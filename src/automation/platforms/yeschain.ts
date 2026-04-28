@@ -55,7 +55,7 @@ export class YesChainConnector extends Connector {
 
       // 明確跳轉到搜尋頁，與 MDT 相同做法
       console.log('[好鄰居] 跳轉至 otcProd 搜尋頁...')
-      await page.goto('https://www.yeschain.com.tw/b2bStoreCart/otcProd', { waitUntil: 'domcontentloaded' })
+      await page.goto('https://www.yeschain.com.tw/b2bStoreCart/prod', { waitUntil: 'domcontentloaded' })
       await page.waitForTimeout(1000)
       console.log('[好鄰居] 登入完成。')
     } catch (e) {
