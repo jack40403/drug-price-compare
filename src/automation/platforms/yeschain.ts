@@ -49,27 +49,31 @@ export class YesChainConnector extends Connector {
     // 【靜態監視模式】只需看到「登入成功」訊號出現，立刻接手
     try {
       console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中，無需手動關閉提示)...')
-      
+
+      // 等待明確的登入後頁面特徵，排除 password 消失這種中途假訊號
       await page.waitForFunction(() => {
         const text = document.body.innerText
         const url = window.location.href
-        // 判定標準：只要看見「登入成功」、「歡迎您」或網址已變動，即視為成功
-        return url.includes('otcProd') || 
-               url.includes('prod') || 
-               url.includes('Product') ||
-               text.includes('登入成功') || 
-               text.includes('歡迎您') ||
-               document.querySelector('input#password') === null
+        return url.includes('otcProd') ||
+               url.includes('b2bStoreCart/prod') ||
+               text.includes('登入成功') ||
+               text.includes('歡迎您')
       }, { timeout: 300000 })
-      
-      // 捕捉到訊號，立刻執行強力跳轉
-      console.log('[好鄰居] 偵測到成功訊號，正在跳轉至 otcProd...')
-      await page.goto('https://www.yeschain.com.tw/b2bStoreCart/otcProd', { waitUntil: 'domcontentloaded' })
+
+      // 等待登入 redirect 完全穩定後再跳轉，避免 cookie 尚未寫入
+      console.log('[好鄰居] 偵測到成功訊號，等待 session 穩定...')
+      await page.waitForTimeout(1500)
+
+      console.log('[好鄰居] 正在跳轉至 otcProd...')
+      await page.goto('https://www.yeschain.com.tw/b2bStoreCart/otcProd', { waitUntil: 'networkidle' })
+
+      // 確認搜尋框真的可用再往下走
+      await page.waitForSelector('input[placeholder*="品名至少2個字"]', { timeout: 15000 })
+      console.log('[好鄰居] 頁面就緒，搜尋框已確認可用。')
     } catch (e) {
-      // 超時則交由後續邏輯
+      console.warn('[好鄰居] 登入等待超時或跳轉失敗，交由後續流程處理:', e)
     }
 
-    // [霸道模式] 直接判定成功，讓搜尋流程接手
     return true
   }
 
@@ -100,7 +104,7 @@ export class YesChainConnector extends Connector {
     }
 
     try {
-      await page.waitForSelector(targetSelector, { timeout: 8000 })
+      await page.waitForSelector(targetSelector, { timeout: 20000 })
       
       // 2. 極速貼入 (fastType 會自動處理並實現瞬間值注入)
       console.log(`[好鄰居] 執行極速貼入 -> 欄位: ${targetSelector}`)
