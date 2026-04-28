@@ -33,7 +33,7 @@ export abstract class Connector {
   }
 
   /**
-   * 擬人化輸入：隨機延遲 1-5ms
+   * 擬人化輸入：隨機延遲 0.5-1ms
    */
   async humanType(page: Page, selector: string, text: string) {
     const element = page.locator(selector).first();
@@ -46,8 +46,8 @@ export abstract class Connector {
     await page.waitForTimeout(100); // 稍微停頓確保清空完成
 
     for (const char of text) {
-      // 每一鍵隨機 1-5ms
-      const delay = Math.floor(Math.random() * 5 + 1);
+      // 每一鍵隨機 0.5-1ms
+      const delay = Math.random() * 0.5 + 0.5;
       await page.keyboard.type(char, { delay });
     }
   }
