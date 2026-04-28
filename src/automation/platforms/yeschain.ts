@@ -19,17 +19,12 @@ export class YesChainConnector extends Connector {
 
   async isLoggedIn(page: Page): Promise<boolean> {
     try {
-      const bodyText = await page.textContent('body')
-      // 優先檢查頁面上是否有實體的登入特徵（如「登出」或「歡迎您」）
-      const hasIndicators = bodyText?.includes('登出') || bodyText?.includes('歡迎您')
-      
       const url = page.url()
-      // 如果有登入特徵，或者網址已經進入了內部目錄，即判定為已登入
-      const isLoggedIn = hasIndicators || (!url.includes('b2bStoreCart/login') && 
-             (url.includes('b2bStoreCart/') || url.includes('order') || url.includes('prod') || url.includes('otcProd')))
-             
-      console.log(`[好鄰居] 登入狀態檢查: ${isLoggedIn}`)
-      return isLoggedIn
+      // 只用網址判定，避免靜態文字「歡迎您」誤判
+      if (url.includes('b2bStoreCart/login') || url === 'about:blank') return false
+      return url.includes('b2bStoreCart/otcProd') ||
+             url.includes('b2bStoreCart/prod') ||
+             url.includes('b2bStoreCart/order')
     } catch (e) {
       return false
     }
@@ -45,26 +40,26 @@ export class YesChainConnector extends Connector {
     console.log('[好鄰居] 正在輸入帳密 (擬人化)...')
     await this.humanType(page, 'input#email', creds.username)
     await this.humanType(page, 'input#password', creds.password)
-    
-    // 【靜態監視模式】等到出現明確的登入後頁面特徵
+
     try {
       console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中)...')
 
+      // 等待「離開登入頁」作為成功訊號，不依賴目標頁面的文字或 URL
       await page.waitForFunction(() => {
-        const text = document.body.innerText
-        const url = window.location.href
-        return url.includes('otcProd') ||
-               url.includes('b2bStoreCart/prod') ||
-               text.includes('登入成功') ||
-               text.includes('歡迎您')
+        return !window.location.href.includes('b2bStoreCart/login')
       }, { timeout: 300000 })
 
-      // 等待 session cookie 穩定，後續由 search() 負責導航至正確頁面
-      console.log('[好鄰居] 偵測到登入成功，等待 session 穩定...')
+      // 等待 redirect chain 完全結束
+      console.log('[好鄰居] 偵測到離開登入頁，等待 redirect 完成...')
       await page.waitForTimeout(2000)
-      console.log('[好鄰居] 登入完成，交由搜尋流程接手。')
+
+      // 明確跳轉到搜尋頁，與 MDT 相同做法
+      console.log('[好鄰居] 跳轉至 otcProd 搜尋頁...')
+      await page.goto('https://www.yeschain.com.tw/b2bStoreCart/otcProd', { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(1000)
+      console.log('[好鄰居] 登入完成。')
     } catch (e) {
-      console.warn('[好鄰居] 登入等待超時，交由後續流程處理:', e)
+      console.warn('[好鄰居] 登入等待超時或跳轉失敗:', e)
     }
 
     return true
@@ -90,9 +85,12 @@ export class YesChainConnector extends Connector {
     console.log(`[好鄰居] 動作: 填入 ${fieldName} 欄位 (${targetSelector})`)
     console.log(`[好鄰居] ===============================`)
 
-    // 1. 永遠導航至正確的搜尋分類頁，確保頁面狀態乾淨，不依賴登入後的殘留位置
-    console.log(`[好鄰居] 導航至 ${fieldName} 搜尋頁: ${targetUrl}`)
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' })
+    // 1. 若不在正確頁面才導航（login() 已預先到 otcProd，避免多餘重載）
+    if (!page.url().includes(isCode ? 'b2bStoreCart/prod' : 'b2bStoreCart/otcProd')) {
+      console.log(`[好鄰居] 導航至 ${fieldName} 搜尋頁: ${targetUrl}`)
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(500)
+    }
 
     try {
       await page.waitForSelector(targetSelector, { timeout: 20000 })
