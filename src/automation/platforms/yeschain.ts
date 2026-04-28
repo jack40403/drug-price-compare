@@ -46,11 +46,10 @@ export class YesChainConnector extends Connector {
     await this.humanType(page, 'input#email', creds.username)
     await this.humanType(page, 'input#password', creds.password)
     
-    // 【靜態監視模式】只需看到「登入成功」訊號出現，立刻接手
+    // 【靜態監視模式】等到出現明確的登入後頁面特徵
     try {
-      console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中，無需手動關閉提示)...')
+      console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中)...')
 
-      // 等待明確的登入後頁面特徵，排除 password 消失這種中途假訊號
       await page.waitForFunction(() => {
         const text = document.body.innerText
         const url = window.location.href
@@ -60,24 +59,12 @@ export class YesChainConnector extends Connector {
                text.includes('歡迎您')
       }, { timeout: 300000 })
 
-      // 等待登入 redirect 完全穩定，避免 cookie 尚未寫入
-      console.log('[好鄰居] 偵測到成功訊號，等待 session 穩定...')
-      await page.waitForTimeout(1500)
-
-      // 若 redirect 已帶到 otcProd 就不重複 goto（避免重整頁面時 session 未就緒被踢回登入）
-      if (!page.url().includes('otcProd')) {
-        console.log('[好鄰居] 正在跳轉至 otcProd...')
-        await page.goto('https://www.yeschain.com.tw/b2bStoreCart/otcProd', { waitUntil: 'networkidle' })
-      } else {
-        console.log('[好鄰居] 已在 otcProd，等待頁面完全穩定...')
-        await page.waitForLoadState('networkidle')
-      }
-
-      // 確認搜尋框真的可用再往下走
-      await page.waitForSelector('input[placeholder*="品名至少2個字"]', { timeout: 15000 })
-      console.log('[好鄰居] 頁面就緒，搜尋框已確認可用。')
+      // 等待 session cookie 穩定，後續由 search() 負責導航至正確頁面
+      console.log('[好鄰居] 偵測到登入成功，等待 session 穩定...')
+      await page.waitForTimeout(2000)
+      console.log('[好鄰居] 登入完成，交由搜尋流程接手。')
     } catch (e) {
-      console.warn('[好鄰居] 登入等待超時或跳轉失敗，交由後續流程處理:', e)
+      console.warn('[好鄰居] 登入等待超時，交由後續流程處理:', e)
     }
 
     return true
@@ -103,11 +90,9 @@ export class YesChainConnector extends Connector {
     console.log(`[好鄰居] 動作: 填入 ${fieldName} 欄位 (${targetSelector})`)
     console.log(`[好鄰居] ===============================`)
 
-    // 1. 導航至正確的搜尋分類頁
-    if (!page.url().includes(isCode ? 'b2bStoreCart/prod' : 'b2bStoreCart/otcProd')) {
-      console.log(`[好鄰居] 導航至 ${fieldName} 搜尋頁...`)
-      await page.goto(targetUrl, { waitUntil: 'domcontentloaded' })
-    }
+    // 1. 永遠導航至正確的搜尋分類頁，確保頁面狀態乾淨，不依賴登入後的殘留位置
+    console.log(`[好鄰居] 導航至 ${fieldName} 搜尋頁: ${targetUrl}`)
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' })
 
     try {
       await page.waitForSelector(targetSelector, { timeout: 20000 })
