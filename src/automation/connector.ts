@@ -1,0 +1,104 @@
+import type { Page, BrowserContext } from 'playwright'
+
+export interface ProductResult {
+  platform: string;
+  name: string;
+  spec: string;
+  price: number;
+  unit: string;
+  stock: string;
+  link: string;
+}
+
+export abstract class Connector {
+  abstract platformId: string;
+  abstract platformName: string;
+  abstract baseUrl: string;
+
+  protected context: BrowserContext;
+  constructor(context: BrowserContext) {
+    this.context = context;
+  }
+
+  /**
+   * 極速輸入 (直接貼上模式)
+   * 用於搜尋框，實現零延遲
+   */
+  protected async fastType(page: Page, selector: string, text: string) {
+    const input = page.locator(selector).first();
+    await input.waitFor({ state: 'visible', timeout: 5000 });
+    await input.click();
+    // 直接使用 fill 達成瞬間貼入效果
+    await input.fill(text);
+  }
+
+  /**
+   * 擬人化輸入：隨機延遲 30-70ms，偶爾驚喜停頓 (最大 300ms)
+   */
+  async humanType(page: Page, selector: string, text: string) {
+    const element = page.locator(selector).first();
+    await element.waitFor({ state: 'visible' });
+    await element.focus();
+
+    // 關鍵改善：打字前先全選並刪除原本的內容
+    await page.keyboard.press('Control+A');
+    await page.keyboard.press('Backspace');
+    await page.waitForTimeout(100); // 稍微停頓確保清空完成
+
+    for (const char of text) {
+      // 每一鍵隨機 5-15ms (極速模式)
+      const delay = Math.floor(Math.random() * 10 + 5);
+      await page.keyboard.type(char, { delay });
+    }
+  }
+
+  /**
+   * 辨識是否為健保代碼 (NHI Code)
+   * 規則：末兩碼為 00 或 G0 一律視作健保碼
+   */
+  protected isNHICode(term: string): boolean {
+    const cleanTerm = term.trim();
+    // 偵測是否末兩碼為 00 或 G0 (不分大小寫)
+    const isCode = /(00|G0)$/i.test(cleanTerm);
+    console.log(`[系統判定] 輸入值: "${cleanTerm}", 判定為健保碼: ${isCode}`);
+    return isCode;
+  }
+
+  /**
+   * Check if the current state is "Logged In"
+   */
+  abstract isLoggedIn(page: Page): Promise<boolean>;
+
+  /**
+   * Perform the login sequence
+   */
+  abstract login(page: Page, creds: any): Promise<boolean>;
+
+  /**
+   * Search for a product and return results
+   */
+  abstract search(page: Page, searchTerm: string): Promise<ProductResult[]>;
+
+  /**
+   * Common helper to navigate and ensure login
+   * Now with focus on session persistence:
+   * Only navigates and logs in if not already on the site or not logged in.
+   */
+  async ensureLoggedIn(page: Page, creds: any): Promise<boolean> {
+    const currentUrl = page.url()
+    // If not even on the right domain or on about:blank, go there
+    if (currentUrl === 'about:blank' || !currentUrl.includes(this.baseUrl.split('/')[2])) {
+      console.log(`[${this.platformName}] Navigating to base URL: ${this.baseUrl}`);
+      await page.goto(this.baseUrl, { waitUntil: 'domcontentloaded' });
+    }
+
+    const loggedIn = await this.isLoggedIn(page);
+    if (!loggedIn) {
+      console.log(`[${this.platformName}] Session invalid, attempting login...`);
+      return await this.login(page, creds);
+    }
+    
+    console.log(`[${this.platformName}] Session active, reuse confirmed.`);
+    return true;
+  }
+}
