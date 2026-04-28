@@ -75,43 +75,82 @@ export class YesChainConnector extends Connector {
       ? 'https://www.yeschain.com.tw/b2bStoreCart/prod' 
       : 'https://www.yeschain.com.tw/b2bStoreCart/otcProd'
     
-    const targetSelector = isCode 
-      ? 'input[placeholder*="健保碼至少5個字"]' 
-      : 'input[placeholder*="品名至少2個字"]'
+    // 多候選選擇器：實際 placeholder 可能與「健保碼至少5個字」有差異
+    const candidateSelectors = isCode
+      ? [
+          'input[placeholder*="健保碼至少5個字"]',
+          'input[placeholder*="健保碼"]',
+          'input[placeholder*="健保"]',
+          'input[name*="hid"]',
+          'input[name*="code"]',
+        ]
+      : [
+          'input[placeholder*="品名至少2個字"]',
+          'input[placeholder*="品名"]',
+          'input[placeholder*="名稱"]',
+          'input[name*="drug"]',
+          'input[name*="name"]',
+        ]
 
     console.log(`[好鄰居] ===============================`)
     console.log(`[好鄰居] 判定結果: ${fieldName}`)
     console.log(`[好鄰居] 目標頁面: ${targetUrl}`)
-    console.log(`[好鄰居] 動作: 填入 ${fieldName} 欄位 (${targetSelector})`)
     console.log(`[好鄰居] ===============================`)
 
-    // 1. 若不在正確頁面才導航（login() 已預先到 otcProd，避免多餘重載）
+    // 1. 若不在正確頁面才導航
     if (!page.url().includes(isCode ? 'b2bStoreCart/prod' : 'b2bStoreCart/otcProd')) {
       console.log(`[好鄰居] 導航至 ${fieldName} 搜尋頁: ${targetUrl}`)
       await page.goto(targetUrl, { waitUntil: 'domcontentloaded' })
-      await page.waitForTimeout(500)
+      await page.waitForTimeout(800)
+    } else {
+      // 已在正確頁面，等待 SPA 完全渲染
+      await page.waitForTimeout(800)
+    }
+
+    // 2. 依序嘗試候選選擇器
+    let foundSelector: string | null = null
+    for (const sel of candidateSelectors) {
+      try {
+        await page.waitForSelector(sel, { state: 'visible', timeout: 4000 })
+        foundSelector = sel
+        console.log(`[好鄰居] 命中搜尋框選擇器: ${sel}`)
+        break
+      } catch {
+        console.log(`[好鄰居] 選擇器無效，嘗試下一個: ${sel}`)
+      }
+    }
+
+    // 兜底：找頁面上第一個可見的 text 輸入框
+    if (!foundSelector) {
+      const fallback = 'input[type="text"]:visible, input:not([type]):visible, input[type="search"]:visible'
+      try {
+        const candidate = page.locator('input').filter({ hasNot: page.locator('[type="hidden"], [type="password"]') }).first()
+        if (await candidate.isVisible({ timeout: 2000 })) {
+          foundSelector = 'input:not([type="hidden"]):not([type="password"])'
+          console.log(`[好鄰居] 使用兜底選擇器: 第一個可見 input`)
+        }
+      } catch {}
+    }
+
+    if (!foundSelector) {
+      console.warn(`[好鄰居] 找不到任何可用的 ${fieldName} 搜尋框，當前 URL: ${page.url()}`)
+      return []
     }
 
     try {
-      await page.waitForSelector(targetSelector, { timeout: 20000 })
-      
-      // 2. 極速貼入 (fastType 會自動處理並實現瞬間值注入)
-      console.log(`[好鄰居] 執行極速貼入 -> 欄位: ${targetSelector}`)
-      await this.fastType(page, targetSelector, searchTerm)
-      
-      // 3. 安全觸發搜尋：優先使用 Enter 鍵 (最穩當，可避開點擊到導覽列登出鈕的風險)
-      console.log('[好鄰居] 輸入完成，執行 Enter 鍵觸發搜尋...')
+      console.log(`[好鄰居] 執行極速貼入 -> ${foundSelector}`)
+      await this.fastType(page, foundSelector, searchTerm)
+
+      console.log('[好鄰居] 輸入完成，執行 Enter 觸發搜尋...')
       await page.keyboard.press('Enter')
-      
-      // 4. 輔助點擊：如果 Enter 沒反應，再執行局部精確點擊
+
       await page.waitForTimeout(500)
-      const queryBtn = page.locator(targetSelector).locator('xpath=following-sibling::button | following-sibling::span//button').first()
-      
-      if (await queryBtn.isVisible()) {
-        console.log('[好鄰居] 執行局部精確點擊搜尋鈕...')
+      const queryBtn = page.locator(foundSelector).locator('xpath=following-sibling::button | following-sibling::span//button').first()
+      if (await queryBtn.isVisible().catch(() => false)) {
+        console.log('[好鄰居] 執行精確點擊搜尋鈕...')
         await queryBtn.click({ delay: 100 })
       }
-      
+
       console.log('[好鄰居] 等待搜尋結果載入...')
       await page.waitForTimeout(2000)
     } catch (e) {
