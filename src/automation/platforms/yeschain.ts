@@ -107,11 +107,13 @@ export class YesChainConnector extends Connector {
       await page.waitForTimeout(800)
     }
 
-    // 2. 依序嘗試候選選擇器
+    // 2. 依序嘗試候選選擇器（第一個給較長 timeout 等 SPA 渲染）
     let foundSelector: string | null = null
-    for (const sel of candidateSelectors) {
+    for (let i = 0; i < candidateSelectors.length; i++) {
+      const sel = candidateSelectors[i]
+      const timeout = i === 0 ? 15000 : 3000
       try {
-        await page.waitForSelector(sel, { state: 'visible', timeout: 4000 })
+        await page.waitForSelector(sel, { state: 'visible', timeout })
         foundSelector = sel
         console.log(`[好鄰居] 命中搜尋框選擇器: ${sel}`)
         break
@@ -120,12 +122,11 @@ export class YesChainConnector extends Connector {
       }
     }
 
-    // 兜底：找頁面上第一個可見的 text 輸入框
+    // 兜底：找頁面上第一個可見的非密碼 input
     if (!foundSelector) {
-      const fallback = 'input[type="text"]:visible, input:not([type]):visible, input[type="search"]:visible'
       try {
         const candidate = page.locator('input').filter({ hasNot: page.locator('[type="hidden"], [type="password"]') }).first()
-        if (await candidate.isVisible({ timeout: 2000 })) {
+        if (await candidate.isVisible({ timeout: 3000 })) {
           foundSelector = 'input:not([type="hidden"]):not([type="password"])'
           console.log(`[好鄰居] 使用兜底選擇器: 第一個可見 input`)
         }
