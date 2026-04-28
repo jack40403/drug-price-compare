@@ -60,12 +60,18 @@ export class YesChainConnector extends Connector {
                text.includes('歡迎您')
       }, { timeout: 300000 })
 
-      // 等待登入 redirect 完全穩定後再跳轉，避免 cookie 尚未寫入
+      // 等待登入 redirect 完全穩定，避免 cookie 尚未寫入
       console.log('[好鄰居] 偵測到成功訊號，等待 session 穩定...')
       await page.waitForTimeout(1500)
 
-      console.log('[好鄰居] 正在跳轉至 otcProd...')
-      await page.goto('https://www.yeschain.com.tw/b2bStoreCart/otcProd', { waitUntil: 'networkidle' })
+      // 若 redirect 已帶到 otcProd 就不重複 goto（避免重整頁面時 session 未就緒被踢回登入）
+      if (!page.url().includes('otcProd')) {
+        console.log('[好鄰居] 正在跳轉至 otcProd...')
+        await page.goto('https://www.yeschain.com.tw/b2bStoreCart/otcProd', { waitUntil: 'networkidle' })
+      } else {
+        console.log('[好鄰居] 已在 otcProd，等待頁面完全穩定...')
+        await page.waitForLoadState('networkidle')
+      }
 
       // 確認搜尋框真的可用再往下走
       await page.waitForSelector('input[placeholder*="品名至少2個字"]', { timeout: 15000 })
