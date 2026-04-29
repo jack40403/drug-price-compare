@@ -48,17 +48,14 @@ export class YesChainConnector extends Connector {
     try {
       console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中)...')
 
-      // 等待指向 otcProd 的連結出現（即「會員專區」），代表登入成功
+      // 登入後頁面出現 b2bStoreCart/home 連結，是 AJAX 登入成功的唯一 DOM 指標
       await page.waitForFunction(
-        () => {
-          const el = document.querySelector('a[href*="otcProd"]')
-          return !!el && (el as HTMLElement).offsetParent !== null
-        },
+        () => !!document.querySelector('a[href*="b2bStoreCart/home"]'),
         { timeout: 300000 }
       )
 
-      console.log('[好鄰居] 偵測到會員專區連結，自動點擊導向搜尋頁...')
-      await page.locator('a[href*="otcProd"]').first().click()
+      console.log('[好鄰居] 偵測到登入成功，自動點擊 Your Company 進入會員區...')
+      await page.locator('a[href*="b2bStoreCart/home"]').first().click()
       await page.waitForTimeout(2000)
       console.log(`[好鄰居] 登入完成，落地頁: ${page.url()}`)
       console.log('[好鄰居] 交由搜尋流程接手。')
