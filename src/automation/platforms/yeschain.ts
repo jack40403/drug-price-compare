@@ -48,14 +48,19 @@ export class YesChainConnector extends Connector {
     try {
       console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中)...')
 
-      // 用 waitForURL 偵測離開登入頁，比 waitForFunction 更能應對 POST redirect
+      // 等待真正抵達認證頁面（otcProd / prod / order），避免中途 redirect 誤判
       await page.waitForURL(
-        (url) => !url.toString().includes('b2bStoreCart/login'),
+        (url) => {
+          const u = url.toString()
+          return u.includes('b2bStoreCart/otcProd') ||
+                 u.includes('b2bStoreCart/prod') ||
+                 u.includes('b2bStoreCart/order')
+        },
         { timeout: 300000, waitUntil: 'domcontentloaded' }
       )
 
-      console.log('[好鄰居] 偵測到離開登入頁，等待 session 穩定...')
-      await page.waitForTimeout(2000)
+      console.log(`[好鄰居] 登入成功，落地頁: ${page.url()}`)
+      await page.waitForTimeout(1500)
       console.log('[好鄰居] 登入完成，交由搜尋流程接手。')
     } catch (e) {
       console.warn('[好鄰居] 登入等待超時或跳轉失敗:', e)
@@ -74,6 +79,11 @@ export class YesChainConnector extends Connector {
 
     const landedUrl = page.url()
     console.log(`[好鄰居] 落地頁: ${landedUrl}`)
+
+    if (landedUrl.includes('b2bStoreCart/login')) {
+      console.warn('[好鄰居] 被導向登入頁，session 已過期，停止搜尋')
+      return []
+    }
 
     // 依落地頁決定 selector
     let targetSelector: string
