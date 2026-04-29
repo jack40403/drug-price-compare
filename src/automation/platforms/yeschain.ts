@@ -48,14 +48,17 @@ export class YesChainConnector extends Connector {
     try {
       console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中)...')
 
-      // waitForFunction 在 POST redirect 時即使 context 被摧毀也能由 catch 接住繼續
+      // 偵測密碼欄消失：網站用 AJAX 登入，URL 不變，只能靠 DOM 判定
       await page.waitForFunction(
-        () => !window.location.href.includes('b2bStoreCart/login'),
+        () => !document.querySelector('input[type="password"]'),
         { timeout: 300000 }
       )
 
-      console.log(`[好鄰居] 登入成功，落地頁: ${page.url()}`)
-      await page.waitForTimeout(3000)
+      console.log('[好鄰居] 偵測到密碼欄消失，登入成功')
+      await page.waitForTimeout(2000)
+      // 主動跳轉至搜尋頁，不依賴網站自動導向
+      await page.goto('https://www.yeschain.com.tw/b2bStoreCart/otcProd', { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(1000)
       console.log('[好鄰居] 登入完成，交由搜尋流程接手。')
     } catch (e) {
       console.warn('[好鄰居] 登入等待超時或跳轉失敗:', e)
