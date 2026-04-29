@@ -70,83 +70,31 @@ export class YesChainConnector extends Connector {
     const isCode = this.isNHICode(searchTerm)
     const fieldName = isCode ? '健保碼' : '品名'
     
-    // 根據判定結果選擇目標頁面與選擇器
-    const targetUrl = isCode 
-      ? 'https://www.yeschain.com.tw/b2bStoreCart/prod' 
-      : 'https://www.yeschain.com.tw/b2bStoreCart/otcProd'
-    
-    // 多候選選擇器：實際 placeholder 可能與「健保碼至少5個字」有差異
-    const candidateSelectors = isCode
-      ? [
-          'input[placeholder*="健保碼至少5個字"]',
-          'input[placeholder*="健保碼"]',
-          'input[placeholder*="健保"]',
-          'input[name*="hid"]',
-          'input[name*="code"]',
-        ]
-      : [
-          'input[placeholder*="品名至少2個字"]',
-          'input[placeholder*="品名"]',
-          'input[placeholder*="名稱"]',
-          'input[name*="drug"]',
-          'input[name*="name"]',
-        ]
+    // prod 頁面同時有兩個搜尋框，直接選對應的那個即可
+    const targetUrl = 'https://www.yeschain.com.tw/b2bStoreCart/prod'
+    const targetSelector = isCode
+      ? 'input[placeholder*="健保碼至少5個字"]'
+      : 'input[placeholder*="品名至少2個字"]'
 
-    console.log(`[好鄰居] ===============================`)
-    console.log(`[好鄰居] 判定結果: ${fieldName}`)
-    console.log(`[好鄰居] 目標頁面: ${targetUrl}`)
-    console.log(`[好鄰居] ===============================`)
+    console.log(`[好鄰居] 判定結果: ${fieldName}，選擇器: ${targetSelector}`)
 
-    // 1. 若不在正確頁面才導航
-    if (!page.url().includes(isCode ? 'b2bStoreCart/prod' : 'b2bStoreCart/otcProd')) {
-      console.log(`[好鄰居] 導航至 ${fieldName} 搜尋頁: ${targetUrl}`)
+    // 1. 若不在 prod 頁面才導航
+    if (!page.url().includes('b2bStoreCart/prod')) {
+      console.log(`[好鄰居] 導航至 prod: ${targetUrl}`)
       await page.goto(targetUrl, { waitUntil: 'domcontentloaded' })
-      await page.waitForTimeout(800)
-    } else {
-      // 已在正確頁面，等待 SPA 完全渲染
-      await page.waitForTimeout(800)
     }
 
-    // 2. 依序嘗試候選選擇器（第一個給較長 timeout 等 SPA 渲染）
-    let foundSelector: string | null = null
-    for (let i = 0; i < candidateSelectors.length; i++) {
-      const sel = candidateSelectors[i]
-      const timeout = i === 0 ? 15000 : 3000
-      try {
-        await page.waitForSelector(sel, { state: 'visible', timeout })
-        foundSelector = sel
-        console.log(`[好鄰居] 命中搜尋框選擇器: ${sel}`)
-        break
-      } catch {
-        console.log(`[好鄰居] 選擇器無效，嘗試下一個: ${sel}`)
-      }
-    }
-
-    // 兜底：找頁面上第一個可見的非密碼 input
-    if (!foundSelector) {
-      try {
-        const candidate = page.locator('input').filter({ hasNot: page.locator('[type="hidden"], [type="password"]') }).first()
-        if (await candidate.isVisible({ timeout: 3000 })) {
-          foundSelector = 'input:not([type="hidden"]):not([type="password"])'
-          console.log(`[好鄰居] 使用兜底選擇器: 第一個可見 input`)
-        }
-      } catch {}
-    }
-
-    if (!foundSelector) {
-      console.warn(`[好鄰居] 找不到任何可用的 ${fieldName} 搜尋框，當前 URL: ${page.url()}`)
-      return []
-    }
-
+    // 2. 等目標搜尋框出現，再填入搜尋
     try {
-      console.log(`[好鄰居] 執行極速貼入 -> ${foundSelector}`)
-      await this.fastType(page, foundSelector, searchTerm)
+      await page.waitForSelector(targetSelector, { state: 'visible', timeout: 15000 })
+
+      await this.fastType(page, targetSelector, searchTerm)
 
       console.log('[好鄰居] 輸入完成，執行 Enter 觸發搜尋...')
       await page.keyboard.press('Enter')
 
       await page.waitForTimeout(500)
-      const queryBtn = page.locator(foundSelector).locator('xpath=following-sibling::button | following-sibling::span//button').first()
+      const queryBtn = page.locator(targetSelector).locator('xpath=following-sibling::button | following-sibling::span//button').first()
       if (await queryBtn.isVisible().catch(() => false)) {
         console.log('[好鄰居] 執行精確點擊搜尋鈕...')
         await queryBtn.click({ delay: 100 })
