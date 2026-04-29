@@ -48,21 +48,20 @@ export class YesChainConnector extends Connector {
     try {
       console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中)...')
 
-      // 偵測「登出」出現在頁面上，這是登入成功後的可靠指標
+      // 等待指向 otcProd 的連結出現（即「會員專區」），代表登入成功
       await page.waitForFunction(
         () => {
-          const allEls = Array.from(document.querySelectorAll('a, button, span, li'))
-          return allEls.some(el => (el as HTMLElement).innerText?.includes('登出') && (el as HTMLElement).offsetParent !== null)
+          const el = document.querySelector('a[href*="otcProd"]')
+          return !!el && (el as HTMLElement).offsetParent !== null
         },
         { timeout: 300000 }
       )
 
-      console.log('[好鄰居] 偵測到密碼欄消失，登入成功')
+      console.log('[好鄰居] 偵測到會員專區連結，自動點擊導向搜尋頁...')
+      await page.locator('a[href*="otcProd"]').first().click()
       await page.waitForTimeout(2000)
-      // 主動跳轉至搜尋頁，不依賴網站自動導向
-      await page.goto('https://www.yeschain.com.tw/b2bStoreCart/otcProd', { waitUntil: 'domcontentloaded' })
-      await page.waitForTimeout(1000)
-      console.log('[好鄰居] 登入完成，交由搜尋流程接手。')
+      console.log(`[好鄰居] 登入完成，落地頁: ${page.url()}`)
+      console.log('[好鄰居] 交由搜尋流程接手。')
     } catch (e) {
       console.warn('[好鄰居] 登入等待超時或跳轉失敗:', e)
     }
