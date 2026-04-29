@@ -49,15 +49,10 @@ export class YesChainConnector extends Connector {
         return !window.location.href.includes('b2bStoreCart/login')
       }, { timeout: 300000 })
 
-      // 等待 redirect chain 完全結束
-      console.log('[好鄰居] 偵測到離開登入頁，等待 redirect 完成...')
+      // 等待 redirect 完成後直接回傳，由 search() 負責導航
+      console.log('[好鄰居] 偵測到離開登入頁，等待 session 穩定...')
       await page.waitForTimeout(2000)
-
-      // 明確跳轉到搜尋頁，與 MDT 相同做法
-      console.log('[好鄰居] 跳轉至 otcProd 搜尋頁...')
-      await page.goto('https://www.yeschain.com.tw/b2bStoreCart/prod', { waitUntil: 'domcontentloaded' })
-      await page.waitForTimeout(1000)
-      console.log('[好鄰居] 登入完成。')
+      console.log('[好鄰居] 登入完成，交由搜尋流程接手。')
     } catch (e) {
       console.warn('[好鄰居] 登入等待超時或跳轉失敗:', e)
     }
@@ -78,11 +73,9 @@ export class YesChainConnector extends Connector {
 
     console.log(`[好鄰居] 判定結果: ${fieldName}，選擇器: ${targetSelector}`)
 
-    // 1. 若不在 prod 頁面才導航
-    if (!page.url().includes('b2bStoreCart/prod')) {
-      console.log(`[好鄰居] 導航至 prod: ${targetUrl}`)
-      await page.goto(targetUrl, { waitUntil: 'domcontentloaded' })
-    }
+    // 1. 無條件導航至 prod（確保頁面狀態乾淨，不依賴 login 殘留位置）
+    console.log(`[好鄰居] 導航至 prod: ${targetUrl}`)
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' })
 
     // 2. 等目標搜尋框出現，再填入搜尋
     try {
