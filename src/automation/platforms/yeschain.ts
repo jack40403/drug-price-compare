@@ -48,9 +48,12 @@ export class YesChainConnector extends Connector {
     try {
       console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中)...')
 
-      // 偵測密碼欄消失：網站用 AJAX 登入，URL 不變，只能靠 DOM 判定
+      // 偵測「登出」出現在頁面上，這是登入成功後的可靠指標
       await page.waitForFunction(
-        () => !document.querySelector('input[type="password"]'),
+        () => {
+          const allEls = Array.from(document.querySelectorAll('a, button, span, li'))
+          return allEls.some(el => (el as HTMLElement).innerText?.includes('登出') && (el as HTMLElement).offsetParent !== null)
+        },
         { timeout: 300000 }
       )
 
