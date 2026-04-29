@@ -19,17 +19,12 @@ export class YesChainConnector extends Connector {
 
   async isLoggedIn(page: Page): Promise<boolean> {
     try {
-      const bodyText = await page.textContent('body')
-      // 優先檢查頁面上是否有實體的登入特徵（如「登出」或「歡迎您」）
-      const hasIndicators = bodyText?.includes('登出') || bodyText?.includes('歡迎您')
-      
       const url = page.url()
-      // 如果有登入特徵，或者網址已經進入了內部目錄，即判定為已登入
-      const isLoggedIn = hasIndicators || (!url.includes('b2bStoreCart/login') && 
-             (url.includes('b2bStoreCart/') || url.includes('order') || url.includes('prod') || url.includes('otcProd')))
-             
-      console.log(`[好鄰居] 登入狀態檢查: ${isLoggedIn}`)
-      return isLoggedIn
+      // 只用網址判定，避免靜態文字「歡迎您」誤判
+      if (url.includes('b2bStoreCart/login') || url === 'about:blank') return false
+      return url.includes('b2bStoreCart/otcProd') ||
+             url.includes('b2bStoreCart/prod') ||
+             url.includes('b2bStoreCart/order')
     } catch (e) {
       return false
     }
@@ -42,34 +37,30 @@ export class YesChainConnector extends Connector {
 
     if (await this.isLoggedIn(page)) return true
 
-    console.log('[好鄰居] 正在輸入帳密 (擬人化)...')
-    await this.humanType(page, 'input#email', creds.username)
-    await this.humanType(page, 'input#password', creds.password)
-    
-    // 【靜態監視模式】只需看到「登入成功」訊號出現，立刻接手
     try {
-      console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中，無需手動關閉提示)...')
-      
-      await page.waitForFunction(() => {
-        const text = document.body.innerText
-        const url = window.location.href
-        // 判定標準：只要看見「登入成功」、「歡迎您」或網址已變動，即視為成功
-        return url.includes('otcProd') || 
-               url.includes('prod') || 
-               url.includes('Product') ||
-               text.includes('登入成功') || 
-               text.includes('歡迎您') ||
-               document.querySelector('input#password') === null
-      }, { timeout: 300000 })
-      
-      // 捕捉到訊號，立刻執行強力跳轉
-      console.log('[好鄰居] 偵測到成功訊號，正在跳轉至 otcProd...')
-      await page.goto('https://www.yeschain.com.tw/b2bStoreCart/otcProd', { waitUntil: 'domcontentloaded' })
+      console.log('[好鄰居] 嘗試自動輸入帳密...')
+      await this.humanType(page, 'input#email, input[type="email"], input[name="email"]', creds.username)
+      await this.humanType(page, 'input#password, input[type="password"]', creds.password)
     } catch (e) {
-      // 超時則交由後續邏輯
+      console.warn('[好鄰居] 自動輸入帳密失敗，請手動輸入:', e)
     }
 
-    // [霸道模式] 直接判定成功，讓搜尋流程接手
+    try {
+      console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中)...')
+
+      // 等待「離開登入頁」作為成功訊號，不依賴目標頁面的文字或 URL
+      await page.waitForFunction(() => {
+        return !window.location.href.includes('b2bStoreCart/login')
+      }, { timeout: 300000 })
+
+      // 等待 redirect 完成後直接回傳，由 search() 負責導航
+      console.log('[好鄰居] 偵測到離開登入頁，等待 session 穩定...')
+      await page.waitForTimeout(2000)
+      console.log('[好鄰居] 登入完成，交由搜尋流程接手。')
+    } catch (e) {
+      console.warn('[好鄰居] 登入等待超時或跳轉失敗:', e)
+    }
+
     return true
   }
 
@@ -78,47 +69,34 @@ export class YesChainConnector extends Connector {
     const isCode = this.isNHICode(searchTerm)
     const fieldName = isCode ? '健保碼' : '品名'
     
-    // 根據判定結果選擇目標頁面與選擇器
-    const targetUrl = isCode 
-      ? 'https://www.yeschain.com.tw/b2bStoreCart/prod' 
-      : 'https://www.yeschain.com.tw/b2bStoreCart/otcProd'
-    
-    const targetSelector = isCode 
-      ? 'input[placeholder*="健保碼至少5個字"]' 
+    // prod 頁面同時有兩個搜尋框，直接選對應的那個即可
+    const targetUrl = 'https://www.yeschain.com.tw/b2bStoreCart/prod'
+    const targetSelector = isCode
+      ? 'input[placeholder*="健保碼至少5個字"]'
       : 'input[placeholder*="品名至少2個字"]'
 
-    console.log(`[好鄰居] ===============================`)
-    console.log(`[好鄰居] 判定結果: ${fieldName}`)
-    console.log(`[好鄰居] 目標頁面: ${targetUrl}`)
-    console.log(`[好鄰居] 動作: 填入 ${fieldName} 欄位 (${targetSelector})`)
-    console.log(`[好鄰居] ===============================`)
+    console.log(`[好鄰居] 判定結果: ${fieldName}，選擇器: ${targetSelector}`)
 
-    // 1. 導航至正確的搜尋分類頁
-    if (!page.url().includes(isCode ? 'b2bStoreCart/prod' : 'b2bStoreCart/otcProd')) {
-      console.log(`[好鄰居] 導航至 ${fieldName} 搜尋頁...`)
-      await page.goto(targetUrl, { waitUntil: 'domcontentloaded' })
-    }
+    // 1. 無條件導航至 prod（確保頁面狀態乾淨，不依賴 login 殘留位置）
+    console.log(`[好鄰居] 導航至 prod: ${targetUrl}`)
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' })
 
+    // 2. 等目標搜尋框出現，再填入搜尋
     try {
-      await page.waitForSelector(targetSelector, { timeout: 8000 })
-      
-      // 2. 極速貼入 (fastType 會自動處理並實現瞬間值注入)
-      console.log(`[好鄰居] 執行極速貼入 -> 欄位: ${targetSelector}`)
+      await page.waitForSelector(targetSelector, { state: 'visible', timeout: 15000 })
+
       await this.fastType(page, targetSelector, searchTerm)
-      
-      // 3. 安全觸發搜尋：優先使用 Enter 鍵 (最穩當，可避開點擊到導覽列登出鈕的風險)
-      console.log('[好鄰居] 輸入完成，執行 Enter 鍵觸發搜尋...')
+
+      console.log('[好鄰居] 輸入完成，執行 Enter 觸發搜尋...')
       await page.keyboard.press('Enter')
-      
-      // 4. 輔助點擊：如果 Enter 沒反應，再執行局部精確點擊
+
       await page.waitForTimeout(500)
       const queryBtn = page.locator(targetSelector).locator('xpath=following-sibling::button | following-sibling::span//button').first()
-      
-      if (await queryBtn.isVisible()) {
-        console.log('[好鄰居] 執行局部精確點擊搜尋鈕...')
+      if (await queryBtn.isVisible().catch(() => false)) {
+        console.log('[好鄰居] 執行精確點擊搜尋鈕...')
         await queryBtn.click({ delay: 100 })
       }
-      
+
       console.log('[好鄰居] 等待搜尋結果載入...')
       await page.waitForTimeout(2000)
     } catch (e) {
