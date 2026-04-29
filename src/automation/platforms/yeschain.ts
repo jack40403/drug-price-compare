@@ -48,12 +48,12 @@ export class YesChainConnector extends Connector {
     try {
       console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中)...')
 
-      // 等待「離開登入頁」作為成功訊號，不依賴目標頁面的文字或 URL
-      await page.waitForFunction(() => {
-        return !window.location.href.includes('b2bStoreCart/login')
-      }, { timeout: 300000 })
+      // 用 waitForURL 偵測離開登入頁，比 waitForFunction 更能應對 POST redirect
+      await page.waitForURL(
+        (url) => !url.toString().includes('b2bStoreCart/login'),
+        { timeout: 300000, waitUntil: 'domcontentloaded' }
+      )
 
-      // 等待 redirect 完成後直接回傳，由 search() 負責導航
       console.log('[好鄰居] 偵測到離開登入頁，等待 session 穩定...')
       await page.waitForTimeout(2000)
       console.log('[好鄰居] 登入完成，交由搜尋流程接手。')
@@ -67,21 +67,27 @@ export class YesChainConnector extends Connector {
   async search(page: Page, searchTerm: string): Promise<ProductResult[]> {
     console.log(`[好鄰居] 正準備搜尋: "${searchTerm}"`)
     const isCode = this.isNHICode(searchTerm)
-    const fieldName = isCode ? '健保碼' : '品名'
-    
-    // prod 頁面同時有兩個搜尋框，直接選對應的那個即可
-    const targetUrl = 'https://www.yeschain.com.tw/b2bStoreCart/prod'
-    const targetSelector = isCode
-      ? 'input[placeholder*="健保碼至少5個字"]'
-      : 'input[placeholder*="品名至少2個字"]'
 
-    console.log(`[好鄰居] 判定結果: ${fieldName}，選擇器: ${targetSelector}`)
+    // 導航至 prod，部分帳號會被 redirect 至 otcProd
+    await page.goto('https://www.yeschain.com.tw/b2bStoreCart/prod', { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(800)
 
-    // 1. 無條件導航至 prod（確保頁面狀態乾淨，不依賴 login 殘留位置）
-    console.log(`[好鄰居] 導航至 prod: ${targetUrl}`)
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' })
+    const landedUrl = page.url()
+    console.log(`[好鄰居] 落地頁: ${landedUrl}`)
 
-    // 2. 等目標搜尋框出現，再填入搜尋
+    // 依落地頁決定 selector
+    let targetSelector: string
+    if (landedUrl.includes('otcProd')) {
+      // otcProd 只有一個通用搜尋框
+      targetSelector = 'input[placeholder*="輸入商品名稱或貨號"]'
+      console.log('[好鄰居] 偵測到 otcProd，使用通用搜尋框')
+    } else {
+      targetSelector = isCode
+        ? 'input[placeholder*="健保碼至少5個字"]'
+        : 'input[placeholder*="品名至少2個字"]'
+      console.log(`[好鄰居] 使用 prod 搜尋框: ${targetSelector}`)
+    }
+
     try {
       await page.waitForSelector(targetSelector, { state: 'visible', timeout: 15000 })
 
@@ -100,7 +106,7 @@ export class YesChainConnector extends Connector {
       console.log('[好鄰居] 等待搜尋結果載入...')
       await page.waitForTimeout(2000)
     } catch (e) {
-      console.warn(`[好鄰居] ${fieldName} 搜尋流程發生異常:`, e)
+      console.warn(`[好鄰居] 搜尋流程發生異常:`, e)
       return []
     }
 
