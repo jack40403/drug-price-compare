@@ -48,16 +48,22 @@ export class YesChainConnector extends Connector {
     try {
       console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中)...')
 
-      // 登入後頁面出現 b2bStoreCart/home 連結，是 AJAX 登入成功的唯一 DOM 指標
+      // home 連結登入前就存在，需同時確認密碼欄已隱藏才算真正登入完成
       await page.waitForFunction(
-        () => !!document.querySelector('a[href*="b2bStoreCart/home"]'),
+        () => {
+          const homeLink = document.querySelector('a[href*="b2bStoreCart/home"]')
+          if (!homeLink) return false
+          const pwd = document.querySelector('input[type="password"]')
+          const pwdGone = !pwd || (pwd as HTMLElement).offsetParent === null
+          return pwdGone
+        },
         { timeout: 300000 }
       )
 
-      console.log('[好鄰居] 偵測到登入成功，自動點擊 Your Company 進入會員區...')
-      await page.locator('a[href*="b2bStoreCart/home"]').first().click()
-      await page.waitForTimeout(2000)
-      console.log(`[好鄰居] 登入完成，落地頁: ${page.url()}`)
+      console.log('[好鄰居] 登入成功，直接導向搜尋頁...')
+      await page.goto('https://www.yeschain.com.tw/b2bStoreCart/otcProd', { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(1500)
+      console.log(`[好鄰居] 落地頁: ${page.url()}`)
       console.log('[好鄰居] 交由搜尋流程接手。')
     } catch (e) {
       console.warn('[好鄰居] 登入等待超時或跳轉失敗:', e)
