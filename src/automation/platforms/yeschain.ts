@@ -48,14 +48,14 @@ export class YesChainConnector extends Connector {
     try {
       console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中)...')
 
-      // 只要完整離開登入頁即算成功，waitUntil:'load' 確保 session cookie 已設定
-      await page.waitForURL(
-        (url) => !url.toString().includes('b2bStoreCart/login'),
-        { timeout: 300000, waitUntil: 'load' }
+      // waitForFunction 在 POST redirect 時即使 context 被摧毀也能由 catch 接住繼續
+      await page.waitForFunction(
+        () => !window.location.href.includes('b2bStoreCart/login'),
+        { timeout: 300000 }
       )
 
       console.log(`[好鄰居] 登入成功，落地頁: ${page.url()}`)
-      await page.waitForTimeout(2000)
+      await page.waitForTimeout(3000)
       console.log('[好鄰居] 登入完成，交由搜尋流程接手。')
     } catch (e) {
       console.warn('[好鄰居] 登入等待超時或跳轉失敗:', e)
