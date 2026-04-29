@@ -48,19 +48,14 @@ export class YesChainConnector extends Connector {
     try {
       console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中)...')
 
-      // 等待真正抵達認證頁面（otcProd / prod / order），避免中途 redirect 誤判
+      // 只要完整離開登入頁即算成功，waitUntil:'load' 確保 session cookie 已設定
       await page.waitForURL(
-        (url) => {
-          const u = url.toString()
-          return u.includes('b2bStoreCart/otcProd') ||
-                 u.includes('b2bStoreCart/prod') ||
-                 u.includes('b2bStoreCart/order')
-        },
-        { timeout: 300000, waitUntil: 'domcontentloaded' }
+        (url) => !url.toString().includes('b2bStoreCart/login'),
+        { timeout: 300000, waitUntil: 'load' }
       )
 
       console.log(`[好鄰居] 登入成功，落地頁: ${page.url()}`)
-      await page.waitForTimeout(1500)
+      await page.waitForTimeout(2000)
       console.log('[好鄰居] 登入完成，交由搜尋流程接手。')
     } catch (e) {
       console.warn('[好鄰居] 登入等待超時或跳轉失敗:', e)
