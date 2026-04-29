@@ -37,9 +37,13 @@ export class YesChainConnector extends Connector {
 
     if (await this.isLoggedIn(page)) return true
 
-    console.log('[好鄰居] 正在輸入帳密 (擬人化)...')
-    await this.humanType(page, 'input#email', creds.username)
-    await this.humanType(page, 'input#password', creds.password)
+    try {
+      console.log('[好鄰居] 嘗試自動輸入帳密...')
+      await this.humanType(page, 'input#email, input[type="email"], input[name="email"]', creds.username)
+      await this.humanType(page, 'input#password, input[type="password"]', creds.password)
+    } catch (e) {
+      console.warn('[好鄰居] 自動輸入帳密失敗，請手動輸入:', e)
+    }
 
     try {
       console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中)...')
