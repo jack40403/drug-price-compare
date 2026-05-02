@@ -15,19 +15,16 @@ export class YesChainConnector extends Connector {
 
   async isLoggedIn(page: Page): Promise<boolean> {
     try {
-      // 1. 底層檢查：是否有連線 Session Cookie
-      const cookies = await this.context.cookies()
-      const hasSession = cookies.some(c => c.name.toLowerCase().includes('session') || c.name.includes('token'))
+      // 1. 底層檢查：LocalStorage 裡的 Token
+      const storageToken = await page.evaluate(() => localStorage.getItem('token') || '')
       
-      // 2. 功能檢查：嘗試看目前的 URL，如果是在登入頁面就不算登入
-      const url = page.url()
-      if (url.includes('/login') || url.endsWith('/home')) {
-        // 如果還在首頁或登入頁，且畫面上還有帳號輸入框，代表沒進去
-        const hasEmailInput = await page.$('#email')
-        if (hasEmailInput) return false
-      }
+      // 2. 視覺檢查：看畫面上是否有「登出」文字或「藥局」文字 (這是最穩定的指標)
+      // 使用 page.textContent 抓取 body 的純文字內容來比對
+      const bodyText = await page.innerText('body')
+      const hasLogoutText = bodyText.includes('登出')
+      const hasPharmacyGreeting = bodyText.includes('藥局') && bodyText.includes('您好')
 
-      return hasSession || false
+      return storageToken.length > 50 || hasLogoutText || hasPharmacyGreeting
     } catch (e) {
       return false
     }
@@ -38,26 +35,37 @@ export class YesChainConnector extends Connector {
     if (await this.isLoggedIn(page)) return true
 
     try {
-      console.log('[好鄰居] 正在填入帳號密碼...')
-      // 根據診斷結果修正 ID
-      await page.waitForSelector('#email', { timeout: 5000 })
-      await this.humanType(page, '#email', creds.username)
-      await this.humanType(page, '#password', creds.password)
+      // 核心修正 1：如果畫面上看得到「登入」按鈕但沒看到輸入框，先點按鈕觸發
+      const loginTrigger = page.locator('button:has-text("登入"), a:has-text("登入")').filter({ visible: true }).first()
+      const emailInput = page.locator('input#email').filter({ visible: true }).first()
+      
+      if (await loginTrigger.isVisible() && !(await emailInput.isVisible())) {
+        console.log('[好鄰居] 點擊登入入口按鈕...')
+        await loginTrigger.click()
+        await page.waitForTimeout(1000)
+      }
+
+      // 核心修正 2：使用 visible 過濾器避開分身
+      console.log('[好鄰居] 正在填入帳號密碼 (精確定位可見欄位)...')
+      await emailInput.waitFor({ state: 'visible', timeout: 8000 })
+      await this.humanType(page, 'input#email >> visible=true', creds.username)
+      await this.humanType(page, 'input#password >> visible=true', creds.password)
       
       // 偵測是否有驗證碼
-      const hasCaptcha = await page.$('#rcode')
-      if (hasCaptcha) {
+      const rcode = page.locator('input#rcode').filter({ visible: true }).first()
+      if (await rcode.isVisible()) {
         console.log('[好鄰居] 偵測到驗證碼，請手動輸入並點擊登入...')
-        // 核心修正：改用輪詢主動感應登入狀態 (因為網址不會變)
+        // 核心修正 3：輪詢感應 Token (300秒)
         for (let i = 0; i < 300; i++) {
           if (await this.isLoggedIn(page)) {
             console.log('[好鄰居] 成功感應到登入憑證！')
             return true
           }
-          await page.waitForTimeout(1000) // 每秒感應一次
+          await page.waitForTimeout(1000)
         }
       } else {
-        await page.click('button:has-text("登入")')
+        const submitBtn = page.locator('button:has-text("登入")').filter({ visible: true }).first()
+        await submitBtn.click()
         await page.waitForTimeout(2000)
       }
     } catch (e) {
@@ -73,18 +81,23 @@ export class YesChainConnector extends Connector {
       // 導向正確的搜尋頁面路徑
       await page.goto('https://www.yeschain.com.tw/b2bStoreCart/prod', { waitUntil: 'networkidle' })
       
-      // 等待搜尋框出現
-      const searchInput = 'input[placeholder*="商品"]'
-      await page.waitForSelector(searchInput, { timeout: 10000 })
+      // 等待搜尋框出現 (使用診斷後的精確 placeholder)
+      const searchInput = 'input[placeholder*="品名"]'
+      await page.waitForSelector(searchInput, { state: 'visible', timeout: 10000 })
       
       console.log(`[好鄰居] 執行搜尋: "${searchTerm}"`)
       await this.fastType(page, searchInput, searchTerm)
       
-      // 點擊查詢按鈕
-      await page.click('button:has-text("查詢")')
+      // 點擊查詢按鈕 (更強悍的點擊策略：滾動到視線內 + 強制點擊最後一個「查詢」按鈕)
+      const submitBtn = page.locator('button').filter({ hasText: /^\s*查詢\s*$/ }).last()
       
-      // 等待結果載入
-      await page.waitForTimeout(2500)
+      console.log('[好鄰居] 正在定位並點擊查詢按鈕...')
+      await submitBtn.scrollIntoViewIfNeeded()
+      await page.waitForTimeout(500)
+      await submitBtn.click({ force: true })
+      
+      // 等待結果載入 (好鄰居是用 AJAX 載入，給予充足時間)
+      await page.waitForTimeout(3500)
     } catch (e) {
       console.log('[好鄰居] 搜尋動作失敗:', e)
       return []

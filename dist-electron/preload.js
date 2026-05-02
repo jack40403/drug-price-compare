@@ -1,18 +1,1 @@
-"use strict";
-const electron = require("electron");
-electron.contextBridge.exposeInMainWorld("electronAPI", {
-  getCredentials: (platformId) => electron.ipcRenderer.invoke("get-credentials", platformId),
-  saveCredentials: (creds) => electron.ipcRenderer.invoke("save-credentials", creds),
-  performSearch: (searchTerm, platforms) => electron.ipcRenderer.invoke("perform-search", { searchTerm, platforms }),
-  onUpdateProgress: (callback) => {
-    const subscription = (_event, value) => callback(value);
-    electron.ipcRenderer.on("update-progress", subscription);
-    return () => electron.ipcRenderer.removeListener("update-progress", subscription);
-  },
-  onInitMode: (callback) => {
-    const subscription = (_event, mode) => callback(mode);
-    electron.ipcRenderer.on("init-mode", subscription);
-    return () => electron.ipcRenderer.removeListener("init-mode", subscription);
-  },
-  invoke: (channel, ...args) => electron.ipcRenderer.invoke(channel, ...args)
-});
+"use strict";const n=require("electron");n.contextBridge.exposeInMainWorld("electronAPI",{getCredentials:e=>n.ipcRenderer.invoke("get-credentials",e),saveCredentials:e=>n.ipcRenderer.invoke("save-credentials",e),performSearch:(e,r)=>n.ipcRenderer.invoke("perform-search",{searchTerm:e,platforms:r}),onUpdateProgress:e=>{const r=(o,i)=>e(i);return n.ipcRenderer.on("update-progress",r),()=>n.ipcRenderer.removeListener("update-progress",r)},onInitMode:e=>{const r=(o,i)=>e(i);return n.ipcRenderer.on("init-mode",r),()=>n.ipcRenderer.removeListener("init-mode",r)},invoke:(e,...r)=>n.ipcRenderer.invoke(e,...r)});

@@ -38,7 +38,7 @@ export abstract class Connector {
   }
 
   /**
-   * 擬人化輸入：隨機延遲 0.3-0.5ms
+   * 擬人化輸入 (已加速至 2ms)
    */
   async humanType(page: Page, selector: string, text: string) {
     const element = page.locator(selector).first();
@@ -48,12 +48,10 @@ export abstract class Connector {
     // 關鍵改善：打字前先全選並刪除原本的內容
     await page.keyboard.press('Control+A');
     await page.keyboard.press('Backspace');
-    await page.waitForTimeout(100); // 稍微停頓確保清空完成
+    await page.waitForTimeout(50); // 縮短停頓時間
 
     for (const char of text) {
-      // 每一鍵隨機 0.3-0.5ms
-      const delay = Math.random() * 0.2 + 0.3;
-      await page.keyboard.type(char, { delay });
+      await page.keyboard.type(char, { delay: 2 }); // 固定 2ms 延遲
     }
   }
 

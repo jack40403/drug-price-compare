@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Search, Loader2, ArrowUpDown, CheckCircle2, TrendingDown, Pill, RefreshCcw, Copy, Check, Zap, Banknote, Globe, Image as ImageIcon } from 'lucide-react'
+import { Search, Loader2, ArrowUpDown, CheckCircle2, TrendingDown, Pill, RefreshCcw, Copy, Check, Zap, Banknote, Globe, Activity, Settings, Image as ImageIcon } from 'lucide-react'
 import DrugAppearanceModal from './DrugAppearanceModal'
 
 interface Product {
@@ -32,7 +32,20 @@ const Dashboard = () => {
   const [selectedAppearance, setSelectedAppearance] = useState<any>(null)
   const [isAppearanceLoading, setIsAppearanceLoading] = useState(false)
   const [indexingStatus, setIndexingStatus] = useState<any>(null) // 獨立的建索引狀態
-  const [isStrictFilter, setIsStrictFilter] = useState(false) // 精確過濾開關
+  const [isStrictFilter, setIsStrictFilter] = useState(true) // 精確過濾開關 (預設開啟)
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' | null }>({ key: '', direction: null }) // 排序設定
+
+  const platformColorMap: Record<string, string> = {
+    'binli': 'bg-blue-100 text-blue-800 border-blue-200',
+    'chahwa': 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    'coda': 'bg-purple-100 text-purple-800 border-purple-200',
+    'jhaohong': 'bg-orange-100 text-orange-800 border-orange-200',
+    'mdt': 'bg-rose-100 text-rose-800 border-rose-200',
+    'taichung': 'bg-cyan-100 text-cyan-800 border-cyan-200',
+    'yc': 'bg-amber-100 text-amber-800 border-amber-200',
+    'yeschain': 'bg-teal-100 text-teal-800 border-teal-200',
+    'yusheng': 'bg-indigo-100 text-indigo-800 border-indigo-200'
+  };
   const PLATFORMS = [
     { id: 'binli', name: '彬利' },
     { id: 'chahwa', name: '嘉鏵' },
@@ -187,6 +200,16 @@ const Dashboard = () => {
     }
   }
 
+  const handleSort = (key: string) => {
+    let direction: 'asc' | 'desc' | null = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    } else if (sortConfig.key === key && sortConfig.direction === 'desc') {
+      direction = null;
+    }
+    setSortConfig({ key, direction });
+  }
+
   const handleClearNhiSearch = () => {
     setNhiSearchTerm('')
     setNhiResults([])
@@ -298,146 +321,122 @@ const Dashboard = () => {
     : nhiResults
 
   return (
-    <div className="p-4 md:p-8 w-full max-w-[1400px] mx-auto space-y-8 animate-in fade-in duration-500">
-
-      {/* 📊 小型建索引進度條 (不干擾搜尋) */}
-      {indexingStatus && (
-        <div className={`flex items-center gap-3 px-4 py-2 text-sm font-bold rounded-none border-l-4 ${
-          indexingStatus.status === 'processing' ? 'bg-indigo-50 border-indigo-500 text-indigo-800' :
-          indexingStatus.status === 'success' ? 'bg-emerald-50 border-emerald-500 text-emerald-800' :
-          'bg-rose-50 border-rose-500 text-rose-800'
-        }`}>
-          {indexingStatus.status === 'processing' && <Loader2 size={16} className="animate-spin shrink-0" />}
-          {indexingStatus.status === 'success' && <CheckCircle2 size={16} className="shrink-0" />}
-          <span>
-            {indexingStatus.status === 'processing' && `對全檔資料重建索引中，請稍候...`}
-            {indexingStatus.status === 'success' && `✅ 建置完成！共導入 ${indexingStatus.count.toLocaleString()} 筆藥品。搜尋「可得安穩」吧！`}
-            {indexingStatus.status === 'error' && `❌ 建置失敗：${indexingStatus.message}`}
-          </span>
-          <button onClick={() => setIndexingStatus(null)} className="ml-auto text-current opacity-50 hover:opacity-100">✕</button>
-        </div>
-      )}
-      {connectionError && (
-        <div className="bg-rose-50 border-2 border-rose-200 p-4 rounded-none flex items-center gap-4 animate-bounce">
-          <div className="bg-rose-500 p-2 rounded-none text-white font-bold">!</div>
-          <div className="flex-1">
-            <h4 className="font-bold text-rose-800 text-sm">⚠️ 後端連線異常：偵測到舊版指令</h4>
-            <p className="text-xs text-rose-600">請「完全關閉」本視窗，並在終端機重按 `npm run dev` 啟動，以載入最新的搜尋引擎。</p>
+    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-amber-500/30">
+      {/* 🚀 頂部旗艦導航欄 - 深海黑 */}
+      <header className="sticky top-0 z-50 bg-slate-900/80 backdrop-blur-xl border-b border-white/5 px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center shadow-lg shadow-amber-900/20">
+            <Zap className="text-slate-950 fill-current" size={24} />
+          </div>
+          <div>
+            <h1 className="text-xl font-black tracking-tight text-white uppercase">Pharmacy <span className="text-amber-500">Price Terminal</span></h1>
+            <p className="text-[10px] font-black text-slate-500 tracking-widest uppercase">Clinical Data Management System</p>
           </div>
         </div>
-      )}
+        
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${isSearching ? 'bg-amber-400 animate-pulse' : 'bg-slate-700'}`} />
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{isSearching ? 'Syncing...' : 'System Ready'}</span>
+          </div>
+          <div className="h-4 w-px bg-white/10 mx-2" />
+          <button className="text-slate-500 hover:text-amber-400 transition-colors">
+            <Settings size={20} />
+          </button>
+        </div>
+      </header>
 
+      <main className="max-w-[1600px] mx-auto p-8 space-y-12">
+        {/* 📊 建索引進度條 */}
+        {indexingStatus && (
+          <div className={`flex items-center gap-3 px-4 py-2 text-sm font-bold rounded-lg border-l-4 ${
+            indexingStatus.status === 'processing' ? 'bg-amber-500/10 border-amber-500 text-amber-400' :
+            indexingStatus.status === 'success' ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400' :
+            'bg-rose-500/10 border-rose-500 text-rose-400'
+          }`}>
+            {indexingStatus.status === 'processing' && <Loader2 size={16} className="animate-spin" />}
+            <span>
+              {indexingStatus.status === 'processing' && `對全檔資料重建索引中...`}
+              {indexingStatus.status === 'success' && `✅ 建置完成！共導入 ${indexingStatus.count.toLocaleString()} 筆藥品。`}
+              {indexingStatus.status === 'error' && `❌ 建置失敗：${indexingStatus.message}`}
+            </span>
+          </div>
+        )}
 
-      <section className="space-y-8">
-        <div className="clinical-table-container bg-white flex flex-col md:flex-row items-stretch border-4">
-          <div className="flex-1 px-12 py-12 border-b md:border-b-0 md:border-r-4 border-slate-300">
-            <h3 className="font-black text-slate-900 leading-none text-7xl tracking-tighter">健保藥品快速查詢</h3>
-            <div className="flex items-center gap-4 mt-3">
-              <p className="text-2xl text-teal-600 font-bold italic">NHI Official Drug Database Query</p>
-              <button 
-                onClick={() => setIsMaintenanceMode(!isMaintenanceMode)}
-                className={`text-xs px-2 py-1 border-2 font-black transition-colors ${isMaintenanceMode ? 'bg-slate-900 text-white border-slate-900' : 'text-slate-400 border-slate-200 hover:border-slate-400'}`}
+        <section className="space-y-8">
+          <div className="bg-slate-800/40 rounded-2xl border border-white/5 flex flex-col md:flex-row items-stretch overflow-hidden">
+            <div className="flex-1 px-12 py-12 border-b md:border-b-0 md:border-r border-white/5">
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 text-amber-500 rounded-lg text-[10px] font-black uppercase tracking-wider mb-4 border border-amber-500/20">
+                <Pill size={12} />
+                Clinical Ocean Database
+              </div>
+              <h3 className="font-black text-white leading-none text-6xl tracking-tighter">健保藥品快速查詢</h3>
+              <div className="flex items-center gap-4 mt-4">
+                <p className="text-lg text-amber-500 font-bold">NHI Official Drug Database Search Engine</p>
+                <button 
+                  onClick={() => setIsMaintenanceMode(!isMaintenanceMode)}
+                  className={`text-[10px] px-2 py-1 border rounded-md font-black transition-colors ${isMaintenanceMode ? 'bg-white text-slate-950 border-white' : 'text-slate-500 border-slate-800 hover:border-slate-600'}`}
+                >
+                  {isMaintenanceMode ? '關閉維護' : '資料維護'}
+                </button>
+              </div>
+            </div>
+            <div className="p-8 flex items-center justify-center bg-white/5 min-w-[350px]">
+              <button
+                onClick={handleAutoIndex}
+                className="clinical-btn-tactile clinical-btn-tactile-blue flex items-center gap-4 px-12 py-6 text-xl font-black transition-all active:scale-95"
               >
-                {isMaintenanceMode ? '關閉維護' : '資料維護'}
+                <RefreshCcw size={24} />
+                一鍵重建資料庫
               </button>
             </div>
           </div>
-          <div className="p-4 flex items-center justify-center bg-slate-50 min-w-[300px]">
-            <button
-              onClick={handleAutoIndex}
-              className="clinical-btn-tactile flex items-center gap-3 px-8 py-3 text-sm font-black clinical-btn-tactile-blue bg-indigo-600 border-indigo-800"
-              title="自動掃描健保藥品離線資料庫並重建索引"
-            >
-              <RefreshCcw size={18} />
-              一鍵重建資料庫
-            </button>
-          </div>
-        </div>
 
-        {/* 🛠️ 維護主控台：拖放區塊 */}
+        {/* 🛠️ 維護主控台 */}
         {isMaintenanceMode && (
-          <div 
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={handleFileDrop}
-            className="animate-in slide-in-from-top-4 duration-300"
-          >
-            <div className="border-4 border-dashed border-teal-200 bg-teal-50/30 p-12 text-center group hover:border-teal-400 hover:bg-teal-50 transition-all cursor-crosshair">
-              {!maintenanceStatus || maintenanceStatus.status === 'starting' ? (
-                <div className="space-y-4">
-                  <div className="text-6xl text-teal-200 group-hover:text-teal-400 transition-colors">↓</div>
-                  <h4 className="text-2xl font-black text-teal-800">DROP NHI SOURCE TXT HERE</h4>
-                  <p className="text-sm text-teal-600 font-medium">將健保署下載的原始藥檔 (.TXT) 拖入此處進行索引更新</p>
-                  <p className="text-xs text-teal-400">— 或 —</p>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleOpenFileDialog(); }}
-                    className="mx-auto flex items-center gap-2 px-6 py-3 bg-teal-600 text-white text-sm font-black hover:bg-teal-700 transition-colors"
-                  >
-                    📂 點擊選擇檔案 (可一次選取多個)
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-4 relative">
-                  {/* 緊急重置按鈕 */}
-                  <button 
-                    onClick={() => setMaintenanceStatus(null)}
-                    className="absolute top-0 right-0 text-xs text-slate-400 hover:text-slate-700 px-2 py-1 border border-slate-200 rounded"
-                  >✕ 取消</button>
-                  <div className="flex justify-center flex-wrap gap-2">
-                    {maintenanceStatus.status === 'processing' && (
-                      <>
-                        <Loader2 className="animate-spin text-teal-600" size={32} />
-                        <div className="w-full">
-                          <p className="text-3xl font-black text-teal-900 uppercase">Indexing Database...</p>
-                          <p className="text-teal-600 font-bold mt-2">已處理: {maintenanceStatus.count.toLocaleString()} 筆數據</p>
-                          <p className="text-xs text-teal-400 mt-1 italic">Current: {maintenanceStatus.currentFile}</p>
-                        </div>
-                      </>
-                    )}
-                    {maintenanceStatus.status === 'success' && (
-                      <div className="py-4">
-                        <CheckCircle2 className="text-emerald-500 mx-auto mb-4" size={64} />
-                        <h4 className="text-4xl font-black text-emerald-900">索引更新成功</h4>
-                        <p className="text-emerald-600 font-bold mt-2">共導入 {maintenanceStatus.count.toLocaleString()} 筆臨床藥品數據</p>
-                      </div>
-                    )}
-                    {maintenanceStatus.status === 'error' && (
-                      <div className="py-4">
-                        <h4 className="text-4xl font-black text-rose-900">讀取失敗</h4>
-                        <p className="text-rose-600 font-bold mt-2">請確認檔案格式是否正確或是否有權限讀取</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+          <div className="bg-slate-800/60 rounded-2xl border-2 border-dashed border-amber-500/30 p-12 text-center group hover:border-amber-500/50 hover:bg-amber-500/5 transition-all cursor-crosshair">
+            <div onDragOver={(e) => e.preventDefault()} onDrop={handleFileDrop}>
+              <div className="space-y-4">
+                <div className="text-6xl text-amber-500/20 group-hover:text-amber-500/40 transition-colors">↓</div>
+                <h4 className="text-2xl font-black text-amber-100 uppercase tracking-tight">Drop NHI Database Here</h4>
+                <p className="text-sm text-amber-400/60 font-medium italic">支援拖放健保署 TXT 原始數據檔案進行增量更新</p>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleOpenFileDialog(); }}
+                  className="clinical-btn-tactile clinical-btn-tactile-blue mx-auto flex items-center gap-4 px-12 py-6 text-xl font-black transition-all active:scale-95"
+                >
+                  <Globe size={24} />
+                  點擊選擇健保資料檔案
+                </button>
+              </div>
             </div>
           </div>
         )}
 
-        <form onSubmit={handleNhiSearch} className="clinical-table-container border-4 bg-white">
+        <form onSubmit={handleNhiSearch} className="bg-slate-800 rounded-xl border border-white/10 overflow-hidden shadow-2xl">
           <div className="flex flex-col md:flex-row items-stretch">
-            <div className="flex-1 relative group bg-white border-b-4 md:border-b-0 md:border-r-4 border-slate-300">
+            <div className="flex-1 relative bg-transparent border-b md:border-b-0 md:border-r border-white/5">
               <input
                 type="text"
                 value={nhiSearchTerm}
                 onChange={(e) => setNhiSearchTerm(e.target.value)}
-                placeholder="輸入關鍵字..."
-                className="clinical-hero-input block w-full outline-none"
+                placeholder="輸入商品名稱、健保碼或關鍵字..."
+                className="block w-full pl-8 pr-8 py-6 text-lg font-bold bg-transparent outline-none placeholder:text-slate-600 text-white"
               />
             </div>
-            <div className="p-1 flex items-center justify-center bg-slate-50 min-w-[200px] gap-2">
+            <div className="p-2 flex items-center justify-center bg-white/5 gap-3">
               <button
                 type="button"
                 onClick={handleClearNhiSearch}
-                className="clinical-btn-tactile clinical-btn-tactile-slate px-4 py-2 text-sm font-black whitespace-nowrap"
+                className="clinical-btn-tactile clinical-btn-tactile-slate px-6 py-4 text-lg font-black whitespace-nowrap rounded-sm"
               >
                 清空
               </button>
               <button
                 type="submit"
                 disabled={isNhiSearching}
-                className="clinical-btn-tactile clinical-btn-tactile-blue w-full px-5 py-2 text-sm font-black flex items-center justify-center gap-2"
+                className="clinical-btn-tactile clinical-btn-tactile-blue w-full px-8 py-4 text-xl font-black flex items-center justify-center gap-3 rounded-sm"
               >
-                {isNhiSearching ? <Loader2 size={16} className="animate-spin" /> : null}
+                {isNhiSearching ? <Loader2 size={24} className="animate-spin" /> : null}
                 <span>搜尋</span>
               </button>
             </div>
@@ -527,7 +526,7 @@ const Dashboard = () => {
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => handleShowAppearance(item)}
-                                className="text-sm font-black text-blue-600 hover:text-blue-800 hover:underline text-left leading-tight"
+                                className="text-sm font-black text-amber-400 hover:text-amber-300 hover:underline text-left leading-tight"
                               >
                                 {item.br || '未命名'}
                                 <ImageIcon size={14} className="inline-block ml-1 opacity-40" />
@@ -620,11 +619,15 @@ const Dashboard = () => {
 
       {/* --- Section 2: Market Price Comparison --- */}
       <section className="space-y-6">
-        <div className="mb-6 mt-12 px-6">
-          <h3 className="font-black text-slate-900 text-7xl tracking-tighter leading-none flex items-center gap-4">
-            中盤即時比價查詢
+        <div className="mb-6 mt-12">
+          <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-[10px] font-black uppercase tracking-wider mb-2 border border-indigo-100">
+            <Globe size={12} />
+            Market Liquidity Tracker
+          </div>
+          <h3 className="font-black text-slate-900 text-5xl tracking-tight leading-none flex items-center gap-4">
+            中盤即時比價終端
           </h3>
-          <p className="text-2xl text-teal-600 font-bold mt-3 italic">Automated Market Price Verification Console</p>
+          <p className="text-lg text-indigo-600 font-bold mt-3">串接九大供應平台，即時監控市場價格波動</p>
         </div>
 
         {/* 🚀 平台選擇控制區區塊 */}
@@ -633,18 +636,18 @@ const Dashboard = () => {
             <div className="flex-1">
               {/* 平台開關控制列 */}
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 w-full">
               <button 
                 onClick={selectAllPlatforms}
-                className="clinical-btn-tactile clinical-btn-tactile-blue px-8 py-3 text-sm font-black"
+                className="clinical-btn-tactile clinical-btn-tactile-blue flex-1 py-6 text-xl font-black uppercase rounded-sm"
               >
-                全選 (Select All)
+                全選 (SELECT ALL)
               </button>
               <button 
                 onClick={selectNonePlatforms}
-                className="clinical-btn-tactile clinical-btn-tactile-slate px-8 py-3 text-sm font-black"
+                className="clinical-btn-tactile clinical-btn-tactile-slate flex-1 py-6 text-xl font-black uppercase rounded-sm"
               >
-                清空 (Clear Area)
+                清空 (CLEAR ALL)
               </button>
             </div>
           </div>
@@ -656,50 +659,49 @@ const Dashboard = () => {
                 <button
                   key={platform.id}
                   onClick={() => togglePlatform(platform.id)}
-                  className={`clinical-btn-tactile flex flex-col items-center justify-center gap-2 px-4 py-6 text-center ${
+                  className={`clinical-btn-tactile flex flex-col items-center justify-center gap-3 px-4 py-6 text-center rounded-sm ${
                     isSelected 
-                      ? 'clinical-btn-tactile-blue ring-4 ring-blue-50 z-10' 
+                      ? 'clinical-btn-tactile-blue ring-4 ring-amber-500/20 z-10' 
                       : 'clinical-btn-tactile-slate'
                   }`}
                 >
-                  <div className={`w-10 h-10 rounded-sm flex items-center justify-center border-2 transition-all ${
-                    isSelected ? 'bg-white border-white text-blue-600' : 'bg-slate-200 border-slate-300'
+                  <div className={`w-12 h-12 rounded-sm flex items-center justify-center border-2 transition-all ${
+                    isSelected ? 'bg-slate-950 border-amber-500 text-amber-500 shadow-md shadow-amber-500/10' : 'bg-slate-800 border-slate-700'
                   }`}>
-                    <div className="w-6 h-6 bg-slate-200 rounded-none" />
+                    <div className="w-8 h-8 bg-slate-700 rounded-none" />
                   </div>
-                  <span className="text-xs font-black tracking-tight">{platform.name}</span>
+                  <span className="text-xl font-black tracking-tight">{platform.name}</span>
                 </button>
               )
             })}
           </div>
         </div>
 
-        <form onSubmit={handleSearch} className="clinical-table-container border-4 bg-white">
+        <form onSubmit={handleSearch} className="bg-slate-800 rounded-[2rem] shadow-2xl shadow-amber-900/20 border border-white/10 overflow-hidden group focus-within:ring-8 focus-within:ring-amber-500/10 transition-all duration-300">
           <div className="flex flex-col md:flex-row items-stretch">
-            <div className="flex-1 relative group bg-white border-b-4 md:border-b-0 md:border-r-4 border-slate-300">
+            <div className="flex-1 relative bg-transparent border-b md:border-b-0 md:border-r border-white/5">
               <input
                 id="market-search-input"
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="輸入商品名稱啟動比價..."
-                className="clinical-hero-input block w-full outline-none"
+                placeholder="輸入商品名稱或關鍵字進行全平台比價..."
+                className="block w-full px-12 py-16 text-5xl font-black bg-transparent outline-none placeholder:text-slate-700 text-white tracking-tighter"
               />
             </div>
-            <div className="p-1.5 flex items-center justify-center bg-slate-100 min-w-[320px]">
-              <div className="flex items-stretch gap-2 w-full h-full">
+            <div className="p-6 flex items-center justify-center bg-white/5">
+              <div className="flex items-stretch gap-4 w-full h-full">
                 <button
                   type="button"
                   onClick={() => setIsStrictFilter(!isStrictFilter)}
-                  className={`clinical-btn-tactile flex-1 px-3 py-2 border-2 rounded-none text-xs font-black flex items-center justify-center gap-2 transition-all ${
+                  className={`flex-1 px-4 py-6 text-xl font-black flex items-center justify-center gap-3 transition-all active:scale-95 clinical-btn-tactile rounded-sm ${
                     isStrictFilter 
-                      ? 'bg-amber-500 text-white border-amber-700 shadow-[inset_0_2px_4px_rgba(0,0,0,0.2)]' 
-                      : 'bg-white text-slate-500 border-slate-300 hover:bg-slate-50'
+                      ? 'clinical-btn-tactile-blue' 
+                      : 'clinical-btn-tactile-slate opacity-60'
                   }`}
-                  title={isStrictFilter ? "目前僅顯示精確匹配結果" : "切換至精確過濾 (排除雜訊)"}
                 >
-                  <CheckCircle2 size={16} className={isStrictFilter ? "text-white" : "text-slate-300"} />
-                  <span>{isStrictFilter ? '已開啟精確' : '精確過濾'}</span>
+                  <CheckCircle2 size={24} />
+                  <span>{isStrictFilter ? '已開啟過濾' : '精確過濾'}</span>
                 </button>
 
                 {isSearching && (
@@ -707,18 +709,18 @@ const Dashboard = () => {
                     type="button"
                     onClick={handleStopSearch}
                     disabled={isStopping}
-                    className="clinical-btn-tactile flex-1 px-4 py-2 bg-rose-600 text-white border-rose-800 border-2 rounded-none text-sm font-black flex items-center justify-center"
+                    className="flex-1 px-6 py-4 bg-rose-600 hover:bg-rose-700 text-white rounded-sm text-lg font-black flex items-center justify-center transition-all active:scale-95 shadow-lg shadow-rose-900/20"
                   >
-                    {isStopping ? <Loader2 size={16} className="animate-spin" /> : <span>停止</span>}
+                    {isStopping ? <Loader2 size={24} className="animate-spin" /> : <span>停止</span>}
                   </button>
                 )}
                 <button
                   type="submit"
                   disabled={isSearching}
-                  className="clinical-btn-tactile clinical-btn-tactile-blue flex-2 px-6 py-2 text-base font-black flex items-center justify-center gap-2"
+                  className="clinical-btn-tactile clinical-btn-tactile-blue flex-1 px-6 py-4 text-lg font-black flex items-center justify-center gap-3 transition-all active:scale-95 rounded-sm"
                 >
-                  {isSearching ? <Loader2 size={20} className="animate-spin" /> : <Zap size={20} className="fill-current" />}
-                  <span>{isSearching ? '發動中' : '啟動比價'}</span>
+                  {isSearching ? <Loader2 size={24} className="animate-spin" /> : <Zap size={24} className="fill-current" />}
+                  <span>{isSearching ? '抓取中...' : '啟動比價'}</span>
                 </button>
               </div>
             </div>
@@ -733,14 +735,23 @@ const Dashboard = () => {
             <tr className="text-slate-500 text-sm font-semibold uppercase tracking-wider">
               <th>供應平台</th>
               <th>健保序號</th>
-              <th>健保價</th>
+              <th className="cursor-pointer hover:bg-white/5 transition-all" onClick={() => handleSort('nhiPrice')}>
+                <div className="flex items-center gap-2 justify-center group/h">
+                  健保價 
+                  <div className={`p-1 rounded ${sortConfig.key === 'nhiPrice' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500 group-hover/h:text-slate-300'}`}>
+                    <ArrowUpDown size={14} />
+                  </div>
+                </div>
+              </th>
               <th>藥品名稱 / 規格</th>
               <th>效期 / 備註</th>
-              <th>
-                <div className="flex items-center gap-2">單位售價 <ArrowUpDown size={14} /></div>
+              <th className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => handleSort('price')}>
+                <div className="flex items-center gap-2">單位售價 <ArrowUpDown size={14} className={sortConfig.key === 'price' ? 'text-blue-600' : 'text-slate-300'} /></div>
               </th>
               <th>單價</th>
-              <th>庫存狀態</th>
+              <th className="cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => handleSort('stock')}>
+                <div className="flex items-center gap-2">庫存狀態 <ArrowUpDown size={14} className={sortConfig.key === 'stock' ? 'text-blue-600' : 'text-slate-300'} /></div>
+              </th>
               <th>狀態標記</th>
             </tr>
           </thead>
@@ -748,70 +759,107 @@ const Dashboard = () => {
             {(() => {
               // 實施過濾邏輯
               let displayData = [...searchResults];
+              
+              // 1. 精確過濾
               if (isStrictFilter && searchTerm.trim()) {
-                // 邏輯：關鍵字必須在開頭，或者前面不是中文字（例如：(原廠)脈優）
-                // 這樣可以濾掉「脂脈優」但保留「脈優」
                 const regex = new RegExp(`(^|[^\\u4e00-\\u9fa5])${searchTerm}`, 'i');
                 displayData = displayData.filter(p => regex.test(p.name));
               }
 
-              return displayData.map((product, idx) => (
-                <tr key={idx} className="hover:bg-teal-50/20 transition-colors">
-                <td>
-                  <span className="px-3 py-1 bg-slate-100 text-slate-700 rounded-none font-bold text-sm">
-                    {product.platform}
-                  </span>
-                </td>
-                <td>
-                  <div className="font-mono text-sm text-slate-500">{product.nhiCode || '-'}</div>
-                </td>
-                <td>
-                  <div className="font-bold text-slate-600">{product.nhiPrice ? `$${product.nhiPrice}` : '-'}</div>
-                </td>
-                <td>
-                  <div className="font-bold text-slate-800">{product.name}</div>
-                  <div className="text-xs text-slate-400 mt-1">{product.spec}</div>
-                </td>
-                <td>
-                  <div className="text-xs font-bold text-rose-600">{product.expiry}</div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">{product.memo}</div>
-                </td>
-                <td>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-2xl font-black ${product.isCheapest ? 'text-emerald-600' : 'text-slate-700'}`}>
-                      ${product.price}
-                    </span>
-                    <span className="text-slate-400 text-sm">/ {product.unit}</span>
-                  </div>
-                </td>
-                <td>
-                  <div className="font-bold text-indigo-600">{product.unitPrice ? `$${product.unitPrice}` : '-'}</div>
-                </td>
-                <td>
-                  <div className="flex items-center gap-2">
-                    {(() => {
-                      // 放寬缺貨定義：包含「無、缺、售完、補貨、暫停、0」等關鍵字
-                      const outOfStock = /無|缺|^0$|售完|補貨|暫停/i.test(product.stock);
-                      return (
-                        <>
-                          <div className={`w-2 h-2 rounded-full ${outOfStock ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'}`} />
-                          <span className={`text-sm font-black ${outOfStock ? 'text-rose-600' : 'text-emerald-600'}`}>
-                            {product.stock}
-                          </span>
-                        </>
-                      );
-                    })()}
-                  </div>
-                </td>
-                <td>
-                  {product.isCheapest && (
-                    <div className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-none text-xs font-bold flex items-center gap-1">
-                      <TrendingDown size={12} /> 最划算
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ));
+              // 2. 排序邏輯
+              if (sortConfig.key && sortConfig.direction) {
+                displayData.sort((a, b) => {
+                  if (sortConfig.key === 'nhiPrice') {
+                    const valA = typeof a.nhiPrice === 'number' ? a.nhiPrice : parseFloat(String(a.nhiPrice || '0').replace(/[^\d.]/g, ''));
+                    const valB = typeof b.nhiPrice === 'number' ? b.nhiPrice : parseFloat(String(b.nhiPrice || '0').replace(/[^\d.]/g, ''));
+                    return sortConfig.direction === 'asc' ? valA - valB : valB - valA;
+                  }
+                  if (sortConfig.key === 'price') {
+                    const valA = a.price || 0;
+                    const valB = b.price || 0;
+                    return sortConfig.direction === 'asc' ? valA - valB : valB - valA;
+                  }
+                  if (sortConfig.key === 'stock') {
+                    // 有貨優先：檢查字串中是否包含「無、缺、0、售完」
+                    const isOutOfStock = (s: string) => /無|缺|^0$|售完|補貨|暫停/i.test(s || '');
+                    const aOut = isOutOfStock(a.stock);
+                    const bOut = isOutOfStock(b.stock);
+                    if (aOut === bOut) return 0;
+                    return sortConfig.direction === 'asc' ? (aOut ? 1 : -1) : (aOut ? -1 : 1);
+                  }
+                  return 0;
+                });
+              }
+
+              return displayData.map((product, idx) => {
+                // 根據平台定義「暴力高飽和」底色 (強制覆蓋版)
+                const p = product.platform.toLowerCase();
+                const bgColor = 
+                  p.includes('yeschain') ? '!bg-blue-600/60' :
+                  p.includes('裕利') ? '!bg-amber-600/60' :
+                  p.includes('耀聖') ? '!bg-emerald-600/60' :
+                  '!bg-purple-600/60';
+                
+                const borderColor = 
+                  p.includes('yeschain') ? '!border-blue-400' :
+                  p.includes('裕利') ? '!border-amber-400' :
+                  p.includes('耀聖') ? '!border-emerald-400' :
+                  '!border-purple-400';
+
+                return (
+                  <tr key={idx} className="border-b border-white/10 group">
+                    <td className={`${bgColor} ${borderColor} !border-l-8 font-medium`}>
+                      <span className="px-2 py-1 rounded-full text-[10px] font-black bg-slate-950 text-white border border-white/20 uppercase">
+                        {product.platform}
+                      </span>
+                    </td>
+                    <td className={bgColor}>
+                      <div className="font-mono text-sm text-white font-bold">{product.nhiCode || '-'}</div>
+                    </td>
+                    <td className={bgColor}>
+                      <div className="font-black text-white">$ {product.nhiPrice ? product.nhiPrice : '-'}</div>
+                    </td>
+                    <td className={bgColor}>
+                      <div className="font-black text-white text-xl tracking-tight drop-shadow-md">{product.name}</div>
+                      <div className="text-xs text-white/80 font-bold mt-1">{product.spec}</div>
+                    </td>
+                    <td className={bgColor}>
+                      <div className="text-xs font-black text-white bg-rose-600/80 px-1 inline-block">{product.expiry}</div>
+                      <div className="text-[10px] text-white/90 font-bold mt-0.5">{product.memo}</div>
+                    </td>
+                    <td className={bgColor}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-3xl font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
+                          ${product.price}
+                        </span>
+                        <span className="text-white/70 text-sm font-bold">/ {product.unit}</span>
+                      </div>
+                    </td>
+                    <td className={bgColor}>
+                      <div className="font-black text-white text-lg drop-shadow-sm">{product.unitPrice ? `$${product.unitPrice}` : '-'}</div>
+                    </td>
+                    <td className={bgColor}>
+                      <div className="flex items-center gap-2">
+                        {(() => {
+                          const outOfStock = /無|缺|^0$|售完|補貨|暫停/i.test(product.stock);
+                          return (
+                            <span className={`px-2 py-1 rounded text-sm font-black ${outOfStock ? 'bg-rose-600 text-white animate-pulse' : 'bg-emerald-600 text-white'}`}>
+                              {product.stock}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                    </td>
+                    <td className={bgColor}>
+                      {product.isCheapest && (
+                        <div className="bg-yellow-400 text-slate-950 px-3 py-1 rounded-none text-[10px] font-black flex items-center gap-1 uppercase">
+                          <TrendingDown size={12} /> TOP PRICE
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              });
           })()}
           </tbody>
         </table>
@@ -832,6 +880,13 @@ const Dashboard = () => {
           </div>
         </div>
       )}
+      </main>
+      
+      {/* 🚀 頁腳 */}
+      <footer className="mt-20 border-t border-white/5 p-10 text-center bg-transparent">
+        <p className="text-slate-500 font-bold text-sm">Handcrafted by Lithium Lee</p>
+        <p className="text-[10px] text-slate-600 mt-2 tracking-widest uppercase font-black">Powered by Antigravity Engine</p>
+      </footer>
     </div>
   )
 }

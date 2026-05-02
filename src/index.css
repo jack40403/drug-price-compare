@@ -14,80 +14,65 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f8fafc;
-  color: #1e293b;
+  background-color: #0f172a; /* Slate-900: 淺深海藍 */
+  color: #f1f5f9;
 }
 
 h1, h2, h3 {
   font-weight: 700;
-  color: #0f172a;
+  color: #ffffff;
 }
 
-/* 專業臨床級表格系統 - 強制格線強化 */
+/* 專業臨床級表格系統 - 深色模式優化 */
 .clinical-table {
   border-collapse: collapse !important;
   width: 100%;
   table-layout: auto !important;
-  border: 1.5px solid #cbd5e1 !important; /* Slate-300 */
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
 }
 
 .clinical-table th {
-  background-color: #f1f5f9 !important; /* Slate-100 */
-  border: 1px solid #cbd5e1 !important; /* Slate-300 */
+  background-color: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
   padding: 16px 24px !important;
-  font-size: 14px; /* 從 11px 調大至 14px */
+  font-size: 14px;
   font-weight: 900;
+  color: #94a3b8;
 }
 
 .clinical-table td {
-  border: 1px solid #e2e8f0 !important; /* Slate-200 */
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
   padding: 16px 24px !important;
-  background-color: #ffffff;
+  color: #cbd5e1;
 }
 
-/* 讓表格在容器中更顯眼 - 移除陰影，回歸純粹框線 */
+/* 容器深色化 */
 .clinical-table-container {
-  border-radius: 0.125rem; /* 大幅度縮減圓角：轉向方正工業化設計 */
+  border-radius: 0.75rem;
   overflow: hidden;
-  border: 2px solid #94a3b8; /* Slate-400: 更強烈的邊框界線 */
-  background-color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: rgba(30, 41, 59, 0.5); /* Slate-800/50 */
 }
 
-/* 專業級搜尋框：縮定高度與文字 (最終版) */
-.clinical-hero-input {
-  height: 50px;
-  font-size: 1.125rem; /* 18px */
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  padding-left: 2.5rem;
-  border: none;
-  background-color: transparent;
-  width: 100%;
-}
-
-/* 觸感實體按鈕：不使用陰影，改用底部加厚邊框營造立體感 */
+/* 基礎實體按鈕類別 - 簡化以避免佈局衝突 */
 .clinical-btn-tactile {
-  position: relative;
-  transition: all 0.1s ease;
-  border-bottom-width: 6px !important;
-  border-radius: 0.125rem; /* 方正按鈕 */
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 0.25rem; /* 硬派小圓角 */
 }
 
-.clinical-btn-tactile:active {
-  transform: translateY(4px);
-  border-bottom-width: 2px !important;
-}
-
+/* 實體按鈕 - 琥珀黃旗艦方案 (Amber/Yellow) */
 .clinical-btn-tactile-blue {
-  background: linear-gradient(to bottom, #0d9488, #0f766e); /* Teal-600 to Teal-700 */
-  border: 2px solid #0f766e;
-  border-bottom: 6px solid #115e59 !important; /* Teal-800 */
-  color: white;
+  background: linear-gradient(to bottom, #fbbf24, #f59e0b); /* Amber-400 to Amber-500 */
+  border: 1px solid #f59e0b;
+  border-bottom: 6px solid #b45309 !important; /* Amber-700 (底部加厚金黃色) */
+  color: #020617 !important; /* 深海黑字：確保極高清晰度 */
+  font-weight: 900 !important;
 }
 
 .clinical-btn-tactile-slate {
-  background: linear-gradient(to bottom, #f1f5f9, #e2e8f0);
-  border: 2px solid #94a3b8;
-  border-bottom: 6px solid #64748b !important;
-  color: #334155;
+  background: linear-gradient(to bottom, #1e293b, #0f172a);
+  border: 1px solid #334155;
+  border-bottom: 6px solid #0f172a !important;
+  color: #94a3b8;
 }
