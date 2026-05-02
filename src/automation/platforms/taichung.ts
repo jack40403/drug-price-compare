@@ -60,65 +60,104 @@ export class TaichungConnector extends Connector {
     try {
       await page.waitForSelector(targetSelector, { timeout: 8000 })
       
-      // 2. 極速貼入 (瞬間完成搜尋填報)
       console.log(`[泰昌] 執行極速貼入 -> 欄位: ${targetSelector}`)
       await this.fastType(page, targetSelector, searchTerm)
       
-      // 3. 執行搜尋
-      console.log(`[泰昌] 正在點擊搜尋按鈕...`)
-      await page.click('button.search.button')
+      // 點擊搜尋按鈕
+      const searchBtn = await page.$('button.search.button, button.multi.search')
+      if (searchBtn) {
+        await searchBtn.click()
+      } else {
+        await page.keyboard.press('Enter')
+      }
       
-      console.log('[泰昌] 等待搜尋結果載入...')
       await page.waitForTimeout(2000)
     } catch (e) {
       console.warn(`[泰昌] ${fieldName} 搜尋流程發生異常:`, e)
       return []
     }
 
+    // 處理公告彈窗
+    const postAlert = await page.$('button.confirm.button')
+    if (postAlert) {
+      await postAlert.click()
+      await page.waitForTimeout(500)
+    }
+
     console.log('[Taichung] Waiting for results...')
     try {
-      // Results are usually in rows with class 'order_row' or similar
-      await page.waitForSelector('.order_list_item, .order_row, tr:has(.drug_name)', { timeout: 8000 })
+      await page.waitForFunction(() => {
+        const t = document.body.innerText;
+        return t.includes('健保') || t.includes('產品列表') || t.includes('搜尋結果');
+      }, { timeout: 10000 })
+      await page.waitForTimeout(1500)
     } catch (e) {
-      console.log('[Taichung] Timeout waiting for results or no matches found.')
       return []
     }
 
     const results: ProductResult[] = await page.evaluate((platform) => {
-      // Logic based on typical structure of similar Taiwanese B2B pharmacy sites
-      const items = Array.from(document.querySelectorAll('.order_list_item, .order_row, tr:has(.drug_name)'))
-      if (items.length === 0) return []
+      try {
+        // 1. 抓取所有產品卡片 (li.item 才是獨立的藥品單元)
+        const cards = Array.from(document.querySelectorAll('li.item')).filter(el => {
+          return el.querySelector('.nhi-code') !== null || el.querySelector('h3') !== null;
+        });
 
-      return items.map((item) => {
-        const nameEl = item.querySelector('.drug_name, .title, .name') as HTMLElement
-        if (!nameEl) return null
+        return cards.map((card) => {
+          // 1. 品名 (H3)
+          const nameEl = card.querySelector('h3');
+          const name = nameEl ? nameEl.innerText.trim() : '未知藥品';
 
-        const name = nameEl.innerText.trim()
-        const link = (item.querySelector('a') as HTMLAnchorElement)?.href || window.location.href
+          // 2. 健保代碼 (.nhi-code)
+          const nhiCodeEl = card.querySelector('.nhi-code');
+          const nhiCode = nhiCodeEl ? nhiCodeEl.innerText.trim() : '';
 
-        const priceEl = item.querySelector('.price, .unit_price, .red, font[color="red"]') as HTMLElement
-        const priceText = priceEl?.innerText.replace(/[^0-9.]/g, '') || '0'
-        const price = parseFloat(priceText)
-        
-        const stockEl = item.querySelector('.stock, .inventory, .status') as HTMLElement
-        const stock = stockEl?.innerText.trim() || '有貨'
+          // 3. 健保價 (.nhi-price)
+          const nhiPriceEl = card.querySelector('.nhi-price');
+          const nhiPrice = nhiPriceEl ? parseFloat(nhiPriceEl.innerText.replace(/[^0-9.]/g, '')) : 0;
 
-        const specEl = item.querySelector('.spec, .package, .dosage') as HTMLElement
-        const spec = specEl?.innerText.trim() || ''
+          // 4. 效期 (.lifetime)
+          const expiryEl = card.querySelector('.lifetime');
+          const expiry = expiryEl ? expiryEl.innerText.trim() : '';
 
-        return {
-          platform,
-          name: name,
-          spec: spec,
-          price: isNaN(price) ? 0 : price,
-          unit: '袋/盒',
-          stock: stock,
-          link: link,
-        }
-      }).filter(r => r !== null && r.name) as ProductResult[]
+          // 5. 售價 (.price)
+          const priceEl = card.querySelector('.price');
+          const price = priceEl ? parseFloat(priceEl.innerText.replace(/[^0-9.]/g, '')) : 0;
+
+          // 6. 單位 (.unit)
+          const unitEl = card.querySelector('.unit');
+          const unit = unitEl ? unitEl.innerText.replace(/\//g, '').trim() : '單位';
+
+          // 7. 庫存 (.stock)
+          const stockEl = card.querySelector('.stock');
+          const stockStatus = stockEl ? stockEl.innerText.trim() : '有供貨';
+
+          // 8. 單價換算 (從品名找數量)
+          let unitPrice: number | undefined = undefined;
+          const sizeMatch = name.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
+          if (sizeMatch && price > 0) {
+            const size = parseInt(sizeMatch[1]);
+            if (size > 0) unitPrice = Math.round((price / size) * 100) / 100;
+          }
+
+          return {
+            platform,
+            name,
+            spec: '',
+            price,
+            unit,
+            unitPrice,
+            stock: stockStatus,
+            link: window.location.href,
+            expiry,
+            nhiCode,
+            nhiPrice
+          };
+        });
+      } catch (e) {
+        return [];
+      }
     }, this.platformName)
 
-    console.log(`[Taichung] Scraped ${results.length} products.`)
     return results
   }
 }

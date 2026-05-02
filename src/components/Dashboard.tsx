@@ -32,6 +32,7 @@ const Dashboard = () => {
   const [selectedAppearance, setSelectedAppearance] = useState<any>(null)
   const [isAppearanceLoading, setIsAppearanceLoading] = useState(false)
   const [indexingStatus, setIndexingStatus] = useState<any>(null) // 獨立的建索引狀態
+  const [isStrictFilter, setIsStrictFilter] = useState(false) // 精確過濾開關
   const PLATFORMS = [
     { id: 'binli', name: '彬利' },
     { id: 'chahwa', name: '嘉鏵' },
@@ -685,8 +686,22 @@ const Dashboard = () => {
                 className="clinical-hero-input block w-full outline-none"
               />
             </div>
-            <div className="p-1.5 flex items-center justify-center bg-slate-100 min-w-[220px]">
+            <div className="p-1.5 flex items-center justify-center bg-slate-100 min-w-[320px]">
               <div className="flex items-stretch gap-2 w-full h-full">
+                <button
+                  type="button"
+                  onClick={() => setIsStrictFilter(!isStrictFilter)}
+                  className={`clinical-btn-tactile flex-1 px-3 py-2 border-2 rounded-none text-xs font-black flex items-center justify-center gap-2 transition-all ${
+                    isStrictFilter 
+                      ? 'bg-amber-500 text-white border-amber-700 shadow-[inset_0_2px_4px_rgba(0,0,0,0.2)]' 
+                      : 'bg-white text-slate-500 border-slate-300 hover:bg-slate-50'
+                  }`}
+                  title={isStrictFilter ? "目前僅顯示精確匹配結果" : "切換至精確過濾 (排除雜訊)"}
+                >
+                  <CheckCircle2 size={16} className={isStrictFilter ? "text-white" : "text-slate-300"} />
+                  <span>{isStrictFilter ? '已開啟精確' : '精確過濾'}</span>
+                </button>
+
                 {isSearching && (
                   <button
                     type="button"
@@ -717,25 +732,49 @@ const Dashboard = () => {
           <thead>
             <tr className="text-slate-500 text-sm font-semibold uppercase tracking-wider">
               <th>供應平台</th>
+              <th>健保序號</th>
+              <th>健保價</th>
               <th>藥品名稱 / 規格</th>
+              <th>效期 / 備註</th>
               <th>
                 <div className="flex items-center gap-2">單位售價 <ArrowUpDown size={14} /></div>
               </th>
+              <th>單價</th>
               <th>庫存狀態</th>
               <th>狀態標記</th>
             </tr>
           </thead>
           <tbody className="">
-            {searchResults.map((product, idx) => (
-              <tr key={idx} className="hover:bg-teal-50/20 transition-colors">
+            {(() => {
+              // 實施過濾邏輯
+              let displayData = [...searchResults];
+              if (isStrictFilter && searchTerm.trim()) {
+                // 邏輯：關鍵字必須在開頭，或者前面不是中文字（例如：(原廠)脈優）
+                // 這樣可以濾掉「脂脈優」但保留「脈優」
+                const regex = new RegExp(`(^|[^\\u4e00-\\u9fa5])${searchTerm}`, 'i');
+                displayData = displayData.filter(p => regex.test(p.name));
+              }
+
+              return displayData.map((product, idx) => (
+                <tr key={idx} className="hover:bg-teal-50/20 transition-colors">
                 <td>
                   <span className="px-3 py-1 bg-slate-100 text-slate-700 rounded-none font-bold text-sm">
                     {product.platform}
                   </span>
                 </td>
                 <td>
+                  <div className="font-mono text-sm text-slate-500">{product.nhiCode || '-'}</div>
+                </td>
+                <td>
+                  <div className="font-bold text-slate-600">{product.nhiPrice ? `$${product.nhiPrice}` : '-'}</div>
+                </td>
+                <td>
                   <div className="font-bold text-slate-800">{product.name}</div>
                   <div className="text-xs text-slate-400 mt-1">{product.spec}</div>
+                </td>
+                <td>
+                  <div className="text-xs font-bold text-rose-600">{product.expiry}</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">{product.memo}</div>
                 </td>
                 <td>
                   <div className="flex items-center gap-2">
@@ -746,9 +785,22 @@ const Dashboard = () => {
                   </div>
                 </td>
                 <td>
+                  <div className="font-bold text-indigo-600">{product.unitPrice ? `$${product.unitPrice}` : '-'}</div>
+                </td>
+                <td>
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 size={16} className="text-emerald-500" />
-                    <span className="text-sm font-medium text-slate-600">{product.stock}</span>
+                    {(() => {
+                      // 放寬缺貨定義：包含「無、缺、售完、補貨、暫停、0」等關鍵字
+                      const outOfStock = /無|缺|^0$|售完|補貨|暫停/i.test(product.stock);
+                      return (
+                        <>
+                          <div className={`w-2 h-2 rounded-full ${outOfStock ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'}`} />
+                          <span className={`text-sm font-black ${outOfStock ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            {product.stock}
+                          </span>
+                        </>
+                      );
+                    })()}
                   </div>
                 </td>
                 <td>
@@ -759,7 +811,8 @@ const Dashboard = () => {
                   )}
                 </td>
               </tr>
-            ))}
+            ));
+          })()}
           </tbody>
         </table>
       </div>

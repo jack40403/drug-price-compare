@@ -80,48 +80,55 @@ export class CodaConnector extends Connector {
 
     // ── Parse result cards ───────────────────────────────────────
     const results: ProductResult[] = await page.evaluate((platform) => {
-      const items = Array.from(document.querySelectorAll('a.item'))
+      // 可達的卡片通常是 a.item
+      const items = Array.from(document.querySelectorAll('a.item, .item'))
       return items.map((item) => {
-        const tbl = item.querySelector('table')
-        if (!tbl) return null
-        const rows = tbl.querySelectorAll('tr')
+        const text = (item as HTMLElement).innerText;
+        if (!text.includes('藥品名稱')) return null;
 
-        // Row 1: drug code | stock status
-        const row1cols = rows[0]?.querySelectorAll('td')
-        const stockEl = row1cols?.[1]?.querySelector('label') as HTMLElement | null
-        const stock = stockEl?.innerText.trim() || '未知'
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
-        // Row 2: drug name | price "boxPrice / unitPrice"
-        const row2cols = rows[1]?.querySelectorAll('td')
-        const nameEl = row2cols?.[0]?.querySelector('label') as HTMLElement | null
-        const priceEl = row2cols?.[1]?.querySelector('label') as HTMLElement | null
-        const priceRaw = priceEl?.innerText.trim() || '0'
-        // "1320 / 1.4" → take the first number (package price)
-        const priceMatch = priceRaw.match(/[\d,]+(\.\d+)?/)
-        const price = priceMatch ? parseFloat(priceMatch[0].replace(/,/g, '')) : 0
+        // 1. 健保序號與健保價
+        const nhiCodeMatch = text.match(/健保碼[：:]\s*([A-Z0-9]{10})/);
+        const nhiCode = nhiCodeMatch ? nhiCodeMatch[1] : '';
+        
+        const nhiPriceMatch = text.match(/健保價[：:]\s*([\d,.]+)/);
+        const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, '')) : 0;
 
-        // Row 3: NHI code + unit | NHI price
-        const row3cols = rows[2]?.querySelectorAll('td')
-        const row3text = (row3cols?.[0] as HTMLElement)?.innerText || ''
-        // e.g. "健保碼：AC373441G0 單位：排"
-        const unitMatch = row3text.match(/單位[：:]\s*(\S+)/)
-        const unit = unitMatch?.[1] || 'P'
-        // NHI code only (strip unit part)
-        const nhiCode = row3text.replace(/單位[：:]\s*\S+/, '').trim()
+        // 2. 品名
+        const nameMatch = text.match(/藥品名稱[：:]\s*([^\n]+)/);
+        const name = nameMatch ? nameMatch[1].trim() : (lines[2] || '未知藥品');
+
+        // 3. 售價 (總價 / 單價)
+        // 格式範例: "193 / 7.3"
+        const pricePatternMatch = text.match(/([\d,.]+)\s*\/\s*([\d,.]+)/);
+        const price = pricePatternMatch ? parseFloat(pricePatternMatch[1].replace(/,/g, '')) : 0;
+        const unitPrice = pricePatternMatch ? parseFloat(pricePatternMatch[2].replace(/,/g, '')) : 0;
+
+        // 4. 單位
+        const unitMatch = text.match(/單位[：:]\s*(\S+)/);
+        const unit = unitMatch ? unitMatch[1] : '單位';
+
+        // 5. 庫存
+        const isOutOfStock = text.includes('缺貨') || text.includes('售完');
+        const stockStatus = isOutOfStock ? '缺貨中' : '有庫存';
 
         return {
           platform,
-          name: nameEl?.innerText.trim() || '未知藥品',
-          spec: nhiCode,
-          price,
-          unit,
-          stock,
+          name: name,
+          spec: lines[0]?.replace('藥品編號:', '').trim() || '',
+          price: isNaN(price) ? 0 : price,
+          unitPrice: isNaN(unitPrice) ? 0 : unitPrice,
+          unit: unit,
+          stock: stockStatus,
           link: (item as HTMLAnchorElement).href || window.location.href,
+          expiry: '',
+          nhiCode: nhiCode,
+          nhiPrice: isNaN(nhiPrice) ? 0 : nhiPrice
         }
       }).filter((r) => r !== null) as ProductResult[]
     }, this.platformName)
 
-    // 為保持儀表板整潔，已根據要求暫時關閉資料傳回功能
-    return []
+    return results
   }
 }

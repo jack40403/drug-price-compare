@@ -47,85 +47,105 @@ export class YCConnector extends Connector {
   async search(page: Page, searchTerm: string): Promise<ProductResult[]> {
     console.log(`[YC] Searching for: "${searchTerm}"`)
 
-    // Ensure we are on the product listing page
     if (!page.url().includes('/product/all/index.html')) {
       await page.goto(`${this.baseUrl}/product/all/index.html`, { waitUntil: 'domcontentloaded' })
     }
 
-    // Check for login redirect
-    if (page.url().includes('login') || !await this.isLoggedIn(page)) {
-      console.log('[YC] Not logged in or session expired, skipping search.')
-      return []
-    }
-
-    console.log(`[益全] 正準備搜尋: "${searchTerm}"`)
-    const isCode = this.isNHICode(searchTerm)
-    const targetSelector = isCode ? 'input[name="code"]' : 'input[name="product_name"]'
-    const fieldName = isCode ? '健保碼' : '品名'
-
-    console.log(`[益全] ===============================`)
-    console.log(`[益全] 關鍵字: "${searchTerm}"`)
-    console.log(`[益全] 判定結果: ${fieldName}`)
-    console.log(`[益全] 動作: 填入 ${fieldName} 欄位 (${targetSelector})`)
-    console.log(`[益全] ===============================`)
-
-    await page.waitForSelector(targetSelector)
-    console.log(`[益全] 執行極速貼配 -> 欄位: ${targetSelector}`)
-    await this.fastType(page, targetSelector, searchTerm)
-    await page.keyboard.press('Enter')
-    await page.click('button.btn-primary.btn-block')
-
-    console.log('[YC] Waiting for results...')
     try {
-      // Results are in .thumbnail elements
-      await page.waitForSelector('.thumbnail', { timeout: 8000 })
+      const isCode = this.isNHICode(searchTerm)
+      const targetSelector = isCode ? 'input[name="code"]' : 'input[name="product_name"]'
+      
+      await page.waitForSelector(targetSelector, { timeout: 5000 })
+      await this.fastType(page, targetSelector, searchTerm)
+      await page.keyboard.press('Enter')
+      
+      const searchBtn = await page.$('button.btn-primary.btn-block, button:has-text("搜尋")')
+      if (searchBtn) await searchBtn.click()
+
+      await page.waitForTimeout(2000)
     } catch (e) {
-      console.log('[YC] Timeout waiting for results or no matches found.')
-      return []
+      console.warn('[YC] Search interaction failed')
     }
 
     const results: ProductResult[] = await page.evaluate((platform) => {
-      const items = Array.from(document.querySelectorAll('.thumbnail'))
-      if (items.length === 0) return []
+      // 1. 偵測無結果
+      const bodyText = document.body.innerText;
+      if (bodyText.includes('目前顯示到第 0 筆') || bodyText.includes('共 0 筆')) {
+        return [{
+          platform,
+          name: '⚠️ 無此藥品 (益全未收錄)',
+          spec: '-',
+          price: 0,
+          unit: '-',
+          stock: '缺貨',
+          link: window.location.href,
+          expiry: '-',
+          nhiCode: '-',
+          nhiPrice: 0
+        }]
+      }
 
-      return items.map((item) => {
-        const titleEl = item.querySelector('.thumbnail-title a') as HTMLAnchorElement
-        if (!titleEl) return null
+      // 2. 抓取產品卡片 (使用精確的 .product_info_div)
+      const cards = Array.from(document.querySelectorAll('.product_info_div'));
+      if (cards.length === 0) {
+        // 備案：如果結構變動，嘗試原本的 .thumbnail
+        const alternates = Array.from(document.querySelectorAll('.thumbnail'));
+        if (alternates.length > 0) return alternates.map(alt => ({ platform, name: '結構變動(待更新)', price: 0, unit: '', stock: '', link: '' }));
+        return [];
+      }
 
-        const name = titleEl.innerText.trim()
-        const link = titleEl.href
+      return cards.map((card) => {
+        // 品名 (第一個 A 標籤)
+        const nameEl = card.querySelector('a');
+        const name = nameEl ? nameEl.innerText.trim() : '未知藥品';
+        const link = (nameEl as HTMLAnchorElement)?.href || window.location.href;
 
-        const contentEl = item.querySelector('.thumbnail-content') as HTMLElement
-        const contentText = contentEl?.innerText || ''
+        // 健保碼 (在 col-6 裡面)
+        const text = (card as HTMLElement).innerText;
+        const nhiMatch = text.match(/健保碼[：:]\s*([A-Z0-9]+)/);
+        const nhiCode = nhiMatch ? nhiMatch[1] : '';
 
-        // Parsing logic:
-        // 製造商：XXX
-        // 健保代碼：XXX
-        // 售價：$XXX
-        // 庫存：XXX
-        
-        const priceMatch = contentText.match(/售價：\$([\d,.]+)/)
-        const price = priceMatch ? parseFloat(priceMatch[1].replace(/,/g, '')) : 0
-        
-        const stockMatch = contentText.match(/庫存：(\d+)/)
-        const stock = stockMatch ? stockMatch[1] : '未知'
+        // 效期 (.product_valid_date)
+        const expiryEl = card.querySelector('.product_valid_date');
+        const expiry = expiryEl ? expiryEl.innerText.trim() : '';
 
-        const mfgMatch = contentText.match(/製造商：(.+)/)
-        const spec = mfgMatch ? mfgMatch[1].trim() : ''
+        // 售價 (.product_item_price)
+        const priceEl = card.querySelector('.product_item_price');
+        const priceText = priceEl ? priceEl.innerText.replace(/[^0-9.]/g, '') : '0';
+        const price = parseFloat(priceText) || 0;
+
+        // 庫存 (.product_item_stock)
+        const stockEl = card.querySelector('.product_item_stock');
+        const stock = stockEl ? stockEl.innerText.trim() : '有供貨';
+
+        // 單位 (從品名或文字找)
+        const unitMatch = name.match(/\/ (盒|袋|瓶|支|組|排)/) || text.match(/(?:包裝|\/)\s*\d*\s*(盒|袋|瓶|支|組|排)/);
+        const unit = unitMatch ? unitMatch[1] : '單位';
+
+        // 單價換算
+        let unitPrice: number | undefined = undefined;
+        const sizeMatch = name.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
+        if (sizeMatch && price > 0) {
+          const size = parseInt(sizeMatch[1]);
+          if (size > 0) unitPrice = Math.round((price / size) * 100) / 100;
+        }
 
         return {
           platform,
-          name: name,
-          spec: spec,
-          price: isNaN(price) ? 0 : price,
-          unit: '袋/盒', // YC doesn't always show unit clearly in card, default to generic
-          stock: stock,
-          link: link,
-        }
-      }).filter(r => r !== null && r.name) as ProductResult[]
+          name,
+          spec: '',
+          price,
+          unit,
+          unitPrice,
+          stock,
+          link,
+          expiry,
+          nhiCode,
+          nhiPrice: 0
+        };
+      });
     }, this.platformName)
 
-    console.log(`[YC] Scraped ${results.length} products.`)
     return results
   }
 }

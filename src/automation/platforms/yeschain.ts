@@ -2,14 +2,10 @@ import type { Page, BrowserContext } from 'playwright'
 import { Connector } from '../connector'
 import type { ProductResult } from '../connector'
 
-/**
- * YesChainConnector (好鄰居 / 躍獅)
- * 採用曼達特模式：自動填寫預留驗證碼手動輸入時間
- */
 export class YesChainConnector extends Connector {
   platformId = 'yeschain'
   platformName = '好鄰居 (躍獅)'
-  baseUrl = 'https://www.yeschain.com.tw/b2bStoreCart/login'
+  baseUrl = 'https://www.yeschain.com.tw/b2bStoreCart/home'
 
   protected context: BrowserContext
   constructor(context: BrowserContext) {
@@ -19,137 +15,148 @@ export class YesChainConnector extends Connector {
 
   async isLoggedIn(page: Page): Promise<boolean> {
     try {
+      // 1. 底層檢查：是否有連線 Session Cookie
+      const cookies = await this.context.cookies()
+      const hasSession = cookies.some(c => c.name.toLowerCase().includes('session') || c.name.includes('token'))
+      
+      // 2. 功能檢查：嘗試看目前的 URL，如果是在登入頁面就不算登入
       const url = page.url()
-      // 只用網址判定，避免靜態文字「歡迎您」誤判
-      if (url.includes('b2bStoreCart/login') || url === 'about:blank') return false
-      return url.includes('b2bStoreCart/otcProd') ||
-             url.includes('b2bStoreCart/prod') ||
-             url.includes('b2bStoreCart/order')
+      if (url.includes('/login') || url.endsWith('/home')) {
+        // 如果還在首頁或登入頁，且畫面上還有帳號輸入框，代表沒進去
+        const hasEmailInput = await page.$('#email')
+        if (hasEmailInput) return false
+      }
+
+      return hasSession || false
     } catch (e) {
       return false
     }
   }
 
   async login(page: Page, creds: any): Promise<boolean> {
-    console.log('[好鄰居] 正在導向登入頁面...')
-    await page.goto(this.baseUrl, { waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(1000)
-
+    await page.goto(this.baseUrl, { waitUntil: 'networkidle' })
     if (await this.isLoggedIn(page)) return true
 
     try {
-      console.log('[好鄰居] 嘗試自動輸入帳密...')
-      await this.humanType(page, 'input#email, input[type="email"], input[name="email"]', creds.username)
-      await this.humanType(page, 'input#password, input[type="password"]', creds.password)
+      console.log('[好鄰居] 正在填入帳號密碼...')
+      // 根據診斷結果修正 ID
+      await page.waitForSelector('#email', { timeout: 5000 })
+      await this.humanType(page, '#email', creds.username)
+      await this.humanType(page, '#password', creds.password)
+      
+      // 偵測是否有驗證碼
+      const hasCaptcha = await page.$('#rcode')
+      if (hasCaptcha) {
+        console.log('[好鄰居] 偵測到驗證碼，請手動輸入並點擊登入...')
+        // 核心修正：改用輪詢主動感應登入狀態 (因為網址不會變)
+        for (let i = 0; i < 300; i++) {
+          if (await this.isLoggedIn(page)) {
+            console.log('[好鄰居] 成功感應到登入憑證！')
+            return true
+          }
+          await page.waitForTimeout(1000) // 每秒感應一次
+        }
+      } else {
+        await page.click('button:has-text("登入")')
+        await page.waitForTimeout(2000)
+      }
     } catch (e) {
-      console.warn('[好鄰居] 自動輸入帳密失敗，請手動輸入:', e)
+      console.log('[好鄰居] 登入過程發生錯誤:', e)
     }
 
-    try {
-      console.log('[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中)...')
-
-      // home 連結登入前就存在，需同時確認密碼欄已隱藏才算真正登入完成
-      await page.waitForFunction(
-        () => {
-          const homeLink = document.querySelector('a[href*="b2bStoreCart/home"]')
-          if (!homeLink) return false
-          const pwd = document.querySelector('input[type="password"]')
-          const pwdGone = !pwd || (pwd as HTMLElement).offsetParent === null
-          return pwdGone
-        },
-        { timeout: 300000 }
-      )
-
-      console.log('[好鄰居] 登入成功，直接導向搜尋頁...')
-      await page.goto('https://www.yeschain.com.tw/b2bStoreCart/otcProd', { waitUntil: 'domcontentloaded' })
-      await page.waitForTimeout(1500)
-      console.log(`[好鄰居] 落地頁: ${page.url()}`)
-      console.log('[好鄰居] 交由搜尋流程接手。')
-    } catch (e) {
-      console.warn('[好鄰居] 登入等待超時或跳轉失敗:', e)
-    }
-
-    return true
+    return await this.isLoggedIn(page)
   }
 
   async search(page: Page, searchTerm: string): Promise<ProductResult[]> {
-    console.log(`[好鄰居] 正準備搜尋: "${searchTerm}"`)
-    const isCode = this.isNHICode(searchTerm)
-
-    // 導航至 prod，部分帳號會被 redirect 至 otcProd
-    await page.goto('https://www.yeschain.com.tw/b2bStoreCart/prod', { waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(800)
-
-    const landedUrl = page.url()
-    console.log(`[好鄰居] 落地頁: ${landedUrl}`)
-
-    if (landedUrl.includes('b2bStoreCart/login')) {
-      console.warn('[好鄰居] 被導向登入頁，session 已過期，停止搜尋')
-      return []
-    }
-
-    // 依落地頁決定 selector
-    let targetSelector: string
-    if (landedUrl.includes('otcProd')) {
-      // otcProd 只有一個通用搜尋框
-      targetSelector = 'input[placeholder*="輸入商品名稱或貨號"]'
-      console.log('[好鄰居] 偵測到 otcProd，使用通用搜尋框')
-    } else {
-      targetSelector = isCode
-        ? 'input[placeholder*="健保碼至少5個字"]'
-        : 'input[placeholder*="品名至少2個字"]'
-      console.log(`[好鄰居] 使用 prod 搜尋框: ${targetSelector}`)
-    }
-
     try {
-      await page.waitForSelector(targetSelector, { state: 'visible', timeout: 15000 })
-
-      await this.fastType(page, targetSelector, searchTerm)
-
-      console.log('[好鄰居] 輸入完成，執行 Enter 觸發搜尋...')
-      await page.keyboard.press('Enter')
-
-      await page.waitForTimeout(500)
-      const queryBtn = page.locator(targetSelector).locator('xpath=following-sibling::button | following-sibling::span//button').first()
-      if (await queryBtn.isVisible().catch(() => false)) {
-        console.log('[好鄰居] 執行精確點擊搜尋鈕...')
-        await queryBtn.click({ delay: 100 })
-      }
-
-      console.log('[好鄰居] 等待搜尋結果載入...')
-      await page.waitForTimeout(2000)
+      console.log('[好鄰居] 正在強制跳轉至產品搜尋頁面...')
+      // 導向正確的搜尋頁面路徑
+      await page.goto('https://www.yeschain.com.tw/b2bStoreCart/prod', { waitUntil: 'networkidle' })
+      
+      // 等待搜尋框出現
+      const searchInput = 'input[placeholder*="商品"]'
+      await page.waitForSelector(searchInput, { timeout: 10000 })
+      
+      console.log(`[好鄰居] 執行搜尋: "${searchTerm}"`)
+      await this.fastType(page, searchInput, searchTerm)
+      
+      // 點擊查詢按鈕
+      await page.click('button:has-text("查詢")')
+      
+      // 等待結果載入
+      await page.waitForTimeout(2500)
     } catch (e) {
-      console.warn(`[好鄰居] 搜尋流程發生異常:`, e)
+      console.log('[好鄰居] 搜尋動作失敗:', e)
       return []
     }
 
-    // 6. 解析搜尋結果
     const results: ProductResult[] = await page.evaluate((platform) => {
-      const items = Array.from(document.querySelectorAll('tbody tr'))
-      return items.map((item) => {
-        const nameEl = item.querySelector('td:nth-child(4)') as HTMLElement | null
-        const priceSelect = item.querySelector('select') as HTMLSelectElement | null
-        const specEl = item.querySelector('td:nth-child(6)') as HTMLElement | null
+      try {
+        // 抓取所有資料列 (跳過標題列)
+        const rows = Array.from(document.querySelectorAll('tr')).filter(tr => {
+          return tr.innerText.includes('NT$') || /[A-Z0-9]{10}/.test(tr.innerText);
+        });
 
-        if (!nameEl) return null
+        return rows.map((row) => {
+          const pTags = Array.from(row.querySelectorAll('p'));
+          const pTexts = pTags.map(p => p.innerText.trim());
 
-        let price = 0
-        if (priceSelect && priceSelect.options.length > 0) {
-          const priceText = priceSelect.options[priceSelect.selectedIndex]?.text || ''
-          const match = priceText.match(/[\d,]+/)
-          if (match) price = parseFloat(match[0].replace(/,/g, ''))
-        }
+          // 1. 健保碼 (尋找符合 10 位英數的 P)
+          const nhiCode = pTexts.find(t => /^[A-Z0-9]{10}$/.test(t)) || '';
 
-        return {
-          platform,
-          name: nameEl.innerText.trim(),
-          spec: specEl?.innerText.trim() || '',
-          price: price,
-          unit: 'P',
-          stock: item.innerText.includes('缺貨') ? '缺貨' : '有貨',
-          link: window.location.href,
-        }
-      }).filter(r => r !== null && r.price > 0) as ProductResult[]
+          // 2. 健保價 (尋找包含 NT$ 的 P)
+          const nhiPriceText = pTexts.find(t => t.includes('NT$') && t.length < 15) || '';
+          const nhiPrice = parseFloat(nhiPriceText.replace(/[^0-9.]/g, '')) || 0;
+
+          // 3. 品名 (組合所有藥名相關的 P，排除健保碼和售價)
+          // 通常是中文名 + 英文名
+          const nameParts = pTexts.filter(t => 
+            t.length > 5 && 
+            !/^[A-Z0-9]{10}$/.test(t) && 
+            !t.includes('NT$') &&
+            !t.includes('粒/盒')
+          );
+          const name = nameParts.join(' ') || '未知藥品';
+
+          // 4. 售價與單位 (關鍵：從 OPTION 裡抓)
+          const optionEl = row.querySelector('option');
+          const priceText = optionEl ? optionEl.innerText.trim() : (pTexts.find(t => t.includes('NT$') && t.length > 15) || '');
+          const price = parseFloat(priceText.match(/NT\$\s*([\d,.]+)/)?.[1]?.replace(/,/g, '') || '0');
+          const unit = priceText.split('/').pop()?.trim() || '單位';
+
+          // 5. 庫存
+          const stockEl = row.querySelector('span.font-bold');
+          const stock = stockEl ? stockEl.innerText.trim() : '有貨';
+
+          // 6. 有效期限 (通常在 P 裡面或是組合在藥名裡)
+          const expiryMatch = row.innerText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+          const expiry = expiryMatch ? expiryMatch[1] : '';
+
+          // 單價換算
+          let unitPrice: number | undefined = undefined;
+          const sizeMatch = row.innerText.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
+          if (sizeMatch && price > 0) {
+            const size = parseInt(sizeMatch[1]);
+            if (size > 0) unitPrice = Math.round((price / size) * 100) / 100;
+          }
+
+          return {
+            platform,
+            name,
+            spec: '',
+            price,
+            unit,
+            unitPrice,
+            stock,
+            link: window.location.href,
+            expiry,
+            nhiCode,
+            nhiPrice
+          };
+        });
+      } catch (e) {
+        return [];
+      }
     }, this.platformName)
 
     return results

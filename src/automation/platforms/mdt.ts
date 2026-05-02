@@ -70,36 +70,76 @@ export class MDTConnector extends Connector {
         await page.keyboard.press('Enter');
       }
 
-      // 等待清單載入
-      await page.waitForSelector('.productBox', { timeout: 8000 })
+      // 等待清單載入 (蔓達特通常是 li 結構)
+      await page.waitForSelector('li, .productBox', { timeout: 8000 })
+      // 給予額外穩定時間
+      await page.waitForTimeout(1000)
     } catch (e) {
       console.warn('[蔓達特] 搜尋過程中發生錯誤:', e)
       return []
     }
 
     const results: ProductResult[] = await page.evaluate((platform) => {
-      const boxes = Array.from(document.querySelectorAll('.productBox'))
-      return boxes.map(box => {
-        const nameEl = box.querySelector('.productTitle') as HTMLElement
-        const priceEl = box.querySelector('.wd') as HTMLElement // 價格通常在此
-        const specEl = box.querySelector('.spec') as HTMLElement // 規格
+      // 曼達特可能是 li 或 .pdConList / .pdList 等結構
+      // 我們尋找所有可能包含產品資訊的容器
+      const cards = Array.from(document.querySelectorAll('li, .pdConList, .pdList, .chessboardList')).filter(el => {
+        const text = el.innerText;
+        // 只要有價格符號，或者有缺貨/購物車字眼，且寬度足夠，就視為產品
+        return (text.includes('$') || text.includes('售完') || text.includes('補貨中')) && 
+               (el as HTMLElement).offsetWidth > 150;
+      });
 
-        if (!nameEl) return null
+      return cards.map(card => {
+        const text = (card as HTMLElement).innerText;
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        
+        // 1. 健保序號與健保價
+        const nhiMatch = text.match(/[A-Z0-9]{10}/);
+        const nhiCode = nhiMatch ? nhiMatch[0] : '';
+        const nhiPriceMatch = text.match(/健保價\s*[:：]\s*([\d,.]+)/);
+        const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, '')) : 0;
 
-        const name = nameEl.innerText.trim()
-        const priceText = priceEl?.innerText.replace(/[^0-9.]/g, '') || '0'
-        const price = parseFloat(priceText)
+        // 2. 品名 (跳過產品代碼)
+        let name = lines[0] || '未知藥名';
+        if (/^[0-9A-Z]+$/.test(name) && lines[1]) {
+          name = lines[1];
+        }
+
+        // 3. 規格 (通常在品名下一行)
+        const specIndex = lines.findIndex(l => l === name) + 1;
+        const spec = (specIndex > 0 && lines[specIndex] && !lines[specIndex].includes('$')) ? lines[specIndex] : '';
+
+        // 4. 價格與單位
+        const priceLineIndex = lines.findIndex(l => l.includes('$'));
+        const priceText = priceLineIndex >= 0 ? lines[priceLineIndex].replace(/[^0-9.]/g, '') : '0';
+        const price = parseFloat(priceText);
+        
+        // 單位偵測
+        const unitMatch = lines[priceLineIndex]?.match(/\$\s*[\d,.]+\s*([^\n\s]+)/);
+        const unit = unitMatch ? unitMatch[1] : ((priceLineIndex >= 0 && lines[priceLineIndex + 1]) ? lines[priceLineIndex + 1] : '單位');
+
+        // 5. 效期
+        const expiryMatch = text.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+        const expiry = expiryMatch ? expiryMatch[0] : '';
+
+        // 6. 庫存
+        const isOutOfStock = text.includes('售完') || text.includes('缺貨') || text.includes('補貨中');
+        const stockStatus = isOutOfStock ? '售完/缺貨' : '有供貨';
 
         return {
           platform,
           name: name,
-          spec: specEl?.innerText.trim() || '',
+          spec: spec,
           price: isNaN(price) ? 0 : price,
-          unit: 'P',
-          stock: '有貨', // 蔓達特顯示在列表中通常代表有貨
-          link: window.location.href
+          unit: unit,
+          stock: stockStatus,
+          link: window.location.href,
+          expiry: expiry,
+          memo: '',
+          nhiCode: nhiCode,
+          nhiPrice: isNaN(nhiPrice) ? 0 : nhiPrice
         }
-      }).filter(r => r !== null) as ProductResult[]
+      });
     }, this.platformName)
 
     return results

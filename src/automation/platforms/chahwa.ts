@@ -62,11 +62,9 @@ export class ChahwaConnector extends Connector {
   async search(page: Page, searchTerm: string): Promise<ProductResult[]> {
     console.log(`[嘉鏵] 正準備發動快速搜尋: "${searchTerm}"`)
     
-    // 封裝搜尋輸入邏輯以便重試
     const performSearchStep = async () => {
       await page.goto('https://www.chahwa.com.tw/order.php', { waitUntil: 'networkidle' })
       
-      // 檢查是否有廣告彈窗擋住
       const closeBtn = await page.$('a.bl.cancel')
       if (closeBtn) {
         console.log('[嘉鏵] 偵測到廣告，自動清除中...')
@@ -75,66 +73,83 @@ export class ChahwaConnector extends Connector {
 
       const isCode = this.isNHICode(searchTerm)
       const targetSelector = isCode ? 'input[name="hid"]' : 'input[name="drug"]'
-      const fieldName = isCode ? '健保碼' : '品名'
-
+      
       console.log(`[嘉鏵] 執行極速貼上 -> 欄位: ${targetSelector}`)
       await this.fastType(page, targetSelector, searchTerm)
       await page.keyboard.press('Enter')
       
-      // 等待結果出現
-      await page.waitForSelector('tr:has(a.grpt)', { timeout: 8000 })
+      // 關鍵修正：不再等待表格，改為等待區塊元件 .item
+      await page.waitForSelector('.item', { timeout: 10000 })
+      await page.waitForTimeout(2000)
     }
 
     try {
       await performSearchStep()
     } catch (e) {
-      console.log('[嘉鏵] 搜尋超時或未見結果，開始進行「曼達特式」Session 完整性校對...')
-      
-      // 如果 Session 真的掉了
+      console.log('[嘉鏵] 搜尋超時或未見結果，檢查是否 Session 失效...')
       if (!await this.isLoggedIn(page)) {
-        console.log('[嘉鏵] 確認 Session 已過期，啟動補登救援程序...')
         if (this.savedCreds) {
           const loginSuccess = await this.login(page, this.savedCreds)
           if (loginSuccess) {
-            console.log('[嘉鏵] 補登成功！自動重啟搜尋流程...')
-            try {
-              await performSearchStep()
-            } catch (retryErr) {
-              console.log('[嘉鏵] 重試後仍無結果，判定為無商品。')
-              return []
-            }
+            await performSearchStep()
           }
         }
       } else {
-        console.log('[嘉鏵] Session 仍有效，判定該關鍵字確實無搜尋結果。')
         return []
       }
     }
 
     const results: ProductResult[] = await page.evaluate((platform) => {
-      const rows = Array.from(document.querySelectorAll('tr:has(a.grpt)'))
-      return rows.map((row) => {
-        const nameEl = row.querySelector('a.grpt') as HTMLElement
-        if (!nameEl) return null
+      const items = document.querySelectorAll('.item');
+      if (items.length === 0) return [];
 
-        const rowText = (row as HTMLElement).innerText || ''
+      const products: any[] = [];
+      
+      items.forEach((item) => {
+        const specEl = item.querySelector('.spec') as HTMLElement;
+        if (!specEl) return;
+
+        const specLines = specEl.innerText.split('\n').map(l => l.trim()).filter(Boolean);
         
-        // Price is usually in a <font color="red"> or similar inside the table cells
-        const priceEl = row.querySelector('font[color="red"], span.red, .red') as HTMLElement | null
-        const priceText = priceEl?.innerText.replace(/[^0-9.]/g, '') || '0'
-        const price = parseFloat(priceText)
+        // 尋找品名 (通常是第 3 行，索引 2)
+        const name = specLines[2] || specLines[0] || '';
+        const nhiCode = specLines[0]?.match(/[A-Z0-9]{10}/)?.[0] || '';
+        const nhiPriceMatch = specLines[1]?.match(/健保價:\s*([\d,.]+)/);
+        const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, '')) : 0;
         
-        // Extracting specs and stock from the row text
-        return {
-          platform,
-          name: nameEl.innerText.trim(),
-          spec: rowText.match(/\d+[\u4e00-\u9fa5]+\/\w+/)?.[0] || 'N/A',
-          price: isNaN(price) ? 0 : price,
-          unit: 'P',
-          stock: rowText.includes('有貨') ? '有貨' : '缺貨',
-          link: (nameEl as any).href || window.location.href,
+        // 關鍵修正：尋找包含「庫存」的行索引，售價必在其上方一行
+        const stockIndex = specLines.findIndex(l => l.includes('庫存'));
+        const priceLine = (stockIndex > 0) ? specLines[stockIndex - 1] : '';
+        
+        const priceMatch = priceLine.match(/([\d,.]+)\s*\/\s*([^\n\s]+)/);
+        const price = priceMatch ? parseFloat(priceMatch[1].replace(/,/g, '')) : 0;
+        const unit = priceMatch ? priceMatch[2].trim() : (priceLine.includes('/') ? priceLine.split('/')[1].trim() : '單位');
+
+        const stockStatus = stockIndex >= 0 ? specLines[stockIndex].replace('庫存:', '').trim() : '未知';
+
+        // 有效日期 (改用全區域掃描，因為 .hint 區塊在某些頁面下可能是空的)
+        const itemText = (item as HTMLElement).innerText || '';
+        const expiryMatch = itemText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+        const expiry = expiryMatch ? expiryMatch[0] : '';
+
+        if (name && name !== '品名(中英)') {
+          products.push({
+            platform,
+            name: name,
+            spec: specLines[3] || '',
+            price: isNaN(price) ? 0 : price,
+            unit: unit,
+            stock: stockStatus,
+            link: window.location.href,
+            expiry: expiry,
+            memo: '',
+            nhiCode: nhiCode,
+            nhiPrice: isNaN(nhiPrice) ? 0 : nhiPrice
+          });
         }
-      }).filter(r => r !== null) as ProductResult[]
+      });
+
+      return products;
     }, this.platformName)
 
     console.log(`[Chahwa] Scraped ${results.length} products.`)

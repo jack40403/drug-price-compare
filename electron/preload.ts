@@ -9,5 +9,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update-progress', subscription)
     return () => ipcRenderer.removeListener('update-progress', subscription)
   },
+  onInitMode: (callback: (mode: string) => void) => {
+    const subscription = (_event: any, mode: string) => callback(mode)
+    ipcRenderer.on('init-mode', subscription)
+    return () => ipcRenderer.removeListener('init-mode', subscription)
+  },
   invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
 })

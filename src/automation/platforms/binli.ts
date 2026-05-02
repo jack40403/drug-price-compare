@@ -66,50 +66,94 @@ export class BinLiConnector extends Connector {
     await this.fastType(page, targetSelector, searchTerm)
     await page.click('button.or_query, button:has-text("查詢")')
     
-    console.log('[BinLi] Waiting for results table...')
+    console.log('[彬利] 正在等待搜尋結果載入...');
     try {
-      await page.waitForSelector('table.ordertable', { timeout: 10000 })
+      // 關鍵修正：不再等 table，改為等待區塊式元件 .name-ingredient 出現
+      await page.waitForSelector('.name-ingredient', { timeout: 12000 });
+      console.log('[彬利] 偵測到結果區塊，正在進行最後穩定緩衝 (2秒)...');
+      await page.waitForTimeout(2000); 
     } catch (e) {
-      console.log('[BinLi] Timeout waiting for results. Maybe no matches found.')
-      return []
+      console.log('[彬利] 等待超時：可能該藥品無搜尋結果，或網頁載入過慢。');
+      return [];
     }
 
     const results: ProductResult[] = await page.evaluate((platform) => {
-      const rows = Array.from(document.querySelectorAll('table.ordertable tr')).slice(1) // 跳過標題列
-      if (rows.length === 0) return []
+      // 彬利新版網頁採用區塊式排版，不再使用 table
+      const nameElements = document.querySelectorAll('.name-ingredient');
+      if (nameElements.length === 0) return [];
 
-      return rows.map((row) => {
-        const cols = row.querySelectorAll('td')
-        if (cols.length < 5) return null
+      const products: any[] = [];
+      
+      nameElements.forEach((nameEl) => {
+        const row = nameEl.parentElement;
+        if (!row) return;
+
+        // 1. 抓取品名 (在 .name-ingredient 內的 h3)
+        const nameH3 = nameEl.querySelector('h3');
+        if (!nameH3) return;
+        const name = nameH3.innerText.trim();
+
+        // 2. 抓取成分與備註 (在 .name-ingredient 內的其他文字)
+        const fullText = (nameEl as HTMLElement).innerText || '';
+        const otherLines = fullText.split('\n').map(l => l.trim()).filter(l => l && l !== name);
+        const spec = otherLines[0] || '';
+        const memo = otherLines.slice(1).join(' ');
+
+        // 3. 抓取健保資訊 (在 .nhi)
+        const nhiEl = row.querySelector('.nhi') as HTMLElement;
+        const nhiText = nhiEl?.innerText || '';
+        const nhiCodeMatch = nhiText.match(/[A-Z0-9]{10}/);
+        const nhiCode = nhiCodeMatch ? nhiCodeMatch[0] : '';
+        const nhiPriceMatch = nhiText.match(/健保價：\s*([\d,.]+)/);
+        const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, '')) : 0;
+
+        // 4. 抓取價格與單位 (精準定位標籤)
+        const priceEl = row.querySelector('.price') as HTMLElement;
+        const unitEl = row.querySelector('.unit') as HTMLElement;
         
-        // 取得品名與成分 (第 3 欄, index 2)
-        const nameAndIngredient = cols[2]?.innerText.trim() || ''
-        const name = nameAndIngredient.split('\n')[0] // 第一行是品名
-        const spec = nameAndIngredient.split('\n')[1] || '' // 第二行通常是成分或規格
-
-        // 解析供貨狀況與價格 (第 4 欄, index 3)
-        // 格式範例: "供貨中/293\n250 / 盒"
-        const statusText = cols[3]?.innerText.trim() || ''
+        let price = 0;
+        let unit = '';
         
-        // 提取價格: 找包含 / 的那一列，通常是 "250 / 盒"
-        const priceMatch = statusText.match(/([\d,.]+)\s*\/\s*(.+)/)
-        const price = priceMatch ? parseFloat(priceMatch[1].replace(/,/g, '')) : 0
-        const unit = priceMatch ? priceMatch[2].trim() : ''
+        if (priceEl) {
+          price = parseFloat(priceEl.innerText.replace(/[^0-9.]/g, ''));
+        }
+        
+        if (unitEl) {
+          // 去掉斜線與空格，保留純單位 (如：盒、排)
+          unit = unitEl.innerText.replace(/[\/\s]/g, '').trim();
+        } else {
+          // 如果沒有 .unit 標籤，嘗試從狀態列正則抓取
+          const statusText = row.querySelector('.stock-price-unit')?.innerText || '';
+          const priceMatch = statusText.match(/([\d,.]+)\s*\/\s*([^\n\s]+)/);
+          unit = priceMatch ? priceMatch[2].trim() : '單位';
+        }
 
-        // 提取庫存: 通常在第一行或第二行
-        const stockMatch = statusText.match(/(\d+)/)
-        const stock = stockMatch ? stockMatch[1] : '未知'
+        // 庫存狀態
+        const statusText = row.querySelector('.stock-price-unit')?.innerText || '';
+        const stockStatus = statusText.split('\n')[0] || '未知';
 
-        return {
+        // 5. 效期偵測 (彬利移除效期功能)
+        const expiry = '';
+
+        // 過濾掉標題列 (如果有的話)
+        if (name === '品名 / 成份') return;
+
+        products.push({
           platform,
           name: name,
           spec: spec,
           price: isNaN(price) ? 0 : price,
-          unit: unit,
-          stock: stock,
+          unit: unit || '單位',
+          stock: stockStatus,
           link: window.location.href,
-        }
-      }).filter(r => r !== null && r.name) as ProductResult[]
+          expiry: expiry,
+          memo: memo,
+          nhiCode: nhiCode,
+          nhiPrice: isNaN(nhiPrice) ? 0 : nhiPrice
+        });
+      });
+
+      return products;
     }, this.platformName)
 
     console.log(`[BinLi] Scraped ${results.length} products.`)

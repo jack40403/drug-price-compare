@@ -1,6 +1,8 @@
 import { app, BrowserWindow, ipcMain, safeStorage, dialog } from 'electron'
 import path, { join } from 'path'
 import fs from 'fs'
+import http from 'http'
+import { parse as parseUrl } from 'url'
 import type { Page, BrowserContext, Browser } from 'playwright'
 import { chromium } from 'playwright'
 import Store from './store'
@@ -112,11 +114,18 @@ class AutomationManager {
   private context: BrowserContext | null = null
   private pages: Map<string, Page> = new Map()
 
+  private headless: boolean = false
+
+  setHeadless(headless: boolean) {
+    console.log(`[Manager] Setting headless mode to: ${headless}`)
+    this.headless = headless
+  }
+
   async getContext(): Promise<BrowserContext> {
     if (!this.browser) {
       this.browser = await chromium.launch({ 
-        headless: false,
-        slowMo: 150 
+        headless: this.headless,
+        slowMo: this.headless ? 0 : 150 
       })
     }
     if (!this.context) {
@@ -178,6 +187,19 @@ function createWindow() {
   } else {
     win.loadFile(join(process.env.DIST as string, 'index.html'))
   }
+
+  // --- Start HTTP Bridge Server ---
+  startHttpBridge();
+
+  // Handle initial mode from environment variable
+  if (process.env.APP_MODE) {
+    const isPython = process.env.APP_MODE.toLowerCase() === 'python'
+    automationManager.setHeadless(isPython)
+    // We'll send this to the frontend once it's ready
+    win.webContents.on('did-finish-load', () => {
+      win?.webContents.send('init-mode', process.env.APP_MODE)
+    })
+  }
 }
 
 app.whenReady().then(createWindow)
@@ -210,6 +232,10 @@ ipcMain.handle('save-credentials', (_event, { platformId, username, password }) 
 })
 
 ipcMain.handle('perform-search', async (_event, { searchTerm, platforms }) => {
+  return await performSearch(searchTerm, platforms);
+})
+
+async function performSearch(searchTerm: string, platforms: string[]) {
   console.log(`[Main] Starting concurrent search for: ${searchTerm}`)
   isSearchInterrupted = false
   
@@ -265,7 +291,7 @@ ipcMain.handle('perform-search', async (_event, { searchTerm, platforms }) => {
   }
 
   return results
-})
+}
 
 async function processNhiTxt(event: any, filePaths: string[]) {
   console.log(`[Main] Starting integrated indexing: ${filePaths.length} files`)
@@ -503,6 +529,11 @@ ipcMain.handle('close-connections', async () => {
   return { success: true }
 })
 
+ipcMain.handle('set-automation-mode', async (_event, { headless }) => {
+  automationManager.setHeadless(headless)
+  return { success: true }
+})
+
 
 // --- Drug Appearance Database ---
 let drugAppearanceMap: Map<string, any> = new Map()
@@ -539,6 +570,10 @@ async function loadDrugAppearance() {
 }
 
 ipcMain.handle('get-drug-appearance', (_, { license, name, nhiCode }) => {
+  return getDrugAppearance(license, name, nhiCode);
+})
+
+function getDrugAppearance(license: string, name: string, nhiCode: string) {
   logToFile(`查詢藥品外觀: lic=${license}, name=${name}, nhiCode=${nhiCode}`)
   
   // 1. 優先以許可證字號查詢 (O(1))
@@ -581,7 +616,7 @@ ipcMain.handle('get-drug-appearance', (_, { license, name, nhiCode }) => {
   }
   
   return null
-})
+}
 
 ipcMain.handle('ping', () => {
   logToFile('IPC Ping received');
@@ -627,12 +662,20 @@ loadNhiDatabase();
 loadDrugAppearance();
 
 ipcMain.handle('reload-nhi-db', async () => {
+  return await reloadNhiDb();
+});
+
+async function reloadNhiDb() {
   logToFile('手動要求重新載入健保資料庫...');
   await loadNhiDatabase();
   return { success: true, count: nhiDatabase.length };
-});
+}
 
 ipcMain.handle('integrate-appearance', async () => {
+  return await integrateAppearance();
+});
+
+async function integrateAppearance() {
   logToFile('開始執行外觀資料一鍵整合 (強化比對模式)...');
   if (nhiDatabase.length === 0) {
     await loadNhiDatabase();
@@ -671,9 +714,13 @@ ipcMain.handle('integrate-appearance', async () => {
   }
 
   return { success: true, count: matchCount };
-});
+}
 
 ipcMain.handle('search-nhi-local', async (_, searchTerm: string) => {
+  return await searchNhiLocal(searchTerm);
+})
+
+async function searchNhiLocal(searchTerm: string) {
   logToFile(`專業多條件搜尋: "${searchTerm}"`);
   if (!searchTerm || searchTerm.length < 1) return [];
   
@@ -728,4 +775,138 @@ ipcMain.handle('search-nhi-local', async (_, searchTerm: string) => {
 
   logToFile(`搜尋完畢，回傳最佳匹配結果: ${sorted.length}`);
   return sorted.slice(0, 150); // 放寬結果筆數至 150
-})
+}
+
+// --- HTTP Bridge for Browser Support ---
+function startHttpBridge() {
+  const PORT = 3010;
+  const server = http.createServer(async (req, res) => {
+    // Enable CORS for localhost
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    const parsedUrl = parseUrl(req.url || '', true);
+    let pathname = parsedUrl.pathname || '/';
+    
+    if (req.method === 'POST' && pathname === '/api/invoke') {
+      // ... API handling ...
+      let body = '';
+      req.on('data', chunk => body += chunk.toString());
+      req.on('end', async () => {
+        try {
+          const { channel, args } = JSON.parse(body);
+          console.log(`[Bridge] Invoking ${channel} via HTTP`);
+          
+          let result;
+          if (channel === 'perform-search') {
+            result = await performSearch(args[0].searchTerm, args[0].platforms);
+          } else if (channel === 'search-nhi-local') {
+            result = await searchNhiLocal(args[0]);
+          } else if (channel === 'get-drug-appearance') {
+            result = await getDrugAppearance(args[0].license, args[0].name, args[0].nhiCode);
+          } else if (channel === 'ping') {
+            result = 'pong';
+          } else if (channel === 'set-automation-mode') {
+            automationManager.setHeadless(args[0].headless);
+            result = { success: true };
+          } else if (channel === 'interrupt-search') {
+            isSearchInterrupted = true;
+            await automationManager.interruptPages();
+            result = { success: true };
+          } else if (channel === 'reload-nhi-db') {
+            result = await reloadNhiDb();
+          } else if (channel === 'integrate-appearance') {
+            result = await integrateAppearance();
+          } else if (channel === 'auto-index-nhi') {
+            // Mocking auto-index for bridge
+            const NHI_DIR = path.join(process.cwd(), '健保藥品離線資料庫');
+            if (fs.existsSync(NHI_DIR)) {
+              const allFiles = fs.readdirSync(NHI_DIR).filter(f => /\.(txt|b5)$/i.test(f)).map(f => path.join(NHI_DIR, f));
+              if (allFiles.length > 0) {
+                // Since bridge has no 'event' for progress, we call it synchronously
+                // (This is a limitation, but it works for now)
+                result = await processNhiTxt({ sender: { send: () => {} } }, allFiles);
+              } else {
+                result = { success: false, error: 'No files found' };
+              }
+            } else {
+              result = { success: false, error: 'Database folder not found' };
+            }
+          } else {
+            result = { error: `Channel ${channel} not supported via bridge` };
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+
+    // --- Static File Serving ---
+    if (req.method === 'GET') {
+      if (pathname === '/') pathname = '/index.html';
+      const distPath = path.join(process.cwd(), 'dist');
+      const filePath = path.join(distPath, pathname);
+
+      // Security check: ensure path is within dist
+      if (!filePath.startsWith(distPath)) {
+        res.writeHead(403);
+        res.end('Forbidden');
+        return;
+      }
+
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        const ext = path.extname(filePath).toLowerCase();
+        const mimeTypes: any = {
+          '.html': 'text/html',
+          '.js': 'text/javascript',
+          '.css': 'text/css',
+          '.json': 'application/json',
+          '.png': 'image/png',
+          '.jpg': 'image/jpg',
+          '.gif': 'image/gif',
+          '.svg': 'image/svg+xml',
+          '.wav': 'audio/wav',
+          '.mp4': 'video/mp4',
+          '.woff': 'application/font-woff',
+          '.ttf': 'application/font-ttf',
+          '.eot': 'application/vnd.ms-fontobject',
+          '.otf': 'application/font-otf',
+          '.wasm': 'application/wasm'
+        };
+        const contentType = mimeTypes[ext] || 'application/octet-stream';
+        res.writeHead(200, { 'Content-Type': contentType });
+        fs.createReadStream(filePath).pipe(res);
+      } else {
+        // SPA Fallback: serve index.html for unknown routes
+        const indexPath = path.join(distPath, 'index.html');
+        if (fs.existsSync(indexPath)) {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          fs.createReadStream(indexPath).pipe(res);
+        } else {
+          res.writeHead(404);
+          res.end('Not Found');
+        }
+      }
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`[Bridge] HTTP Bridge Server running at http://0.0.0.0:${PORT}`);
+  });
+}

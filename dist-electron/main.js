@@ -5,6 +5,8 @@ var __publicField = (obj, key2, value) => __defNormalProp(obj, typeof key2 !== "
 const electron = require("electron");
 const path = require("path");
 const fs = require("fs");
+const http = require("http");
+const url = require("url");
 const playwright = require("playwright");
 const require$$0$1 = require("buffer");
 const require$$1$1 = require("string_decoder");
@@ -79,7 +81,7 @@ class Connector {
     await input.fill(text);
   }
   /**
-   * 擬人化輸入：隨機延遲 30-70ms，偶爾驚喜停頓 (最大 300ms)
+   * 擬人化輸入：隨機延遲 0.3-0.5ms
    */
   async humanType(page, selector, text) {
     const element = page.locator(selector).first();
@@ -89,7 +91,7 @@ class Connector {
     await page.keyboard.press("Backspace");
     await page.waitForTimeout(100);
     for (const char of text) {
-      const delay = Math.floor(Math.random() * 10 + 5);
+      const delay = Math.random() * 0.2 + 0.3;
       await page.keyboard.type(char, { delay });
     }
   }
@@ -172,39 +174,69 @@ class BinLiConnector extends Connector {
     console.log(`[彬利] ===============================`);
     await this.fastType(page, targetSelector, searchTerm);
     await page.click('button.or_query, button:has-text("查詢")');
-    console.log("[BinLi] Waiting for results table...");
+    console.log("[彬利] 正在等待搜尋結果載入...");
     try {
-      await page.waitForSelector("table.ordertable", { timeout: 1e4 });
+      await page.waitForSelector(".name-ingredient", { timeout: 12e3 });
+      console.log("[彬利] 偵測到結果區塊，正在進行最後穩定緩衝 (2秒)...");
+      await page.waitForTimeout(2e3);
     } catch (e) {
-      console.log("[BinLi] Timeout waiting for results. Maybe no matches found.");
+      console.log("[彬利] 等待超時：可能該藥品無搜尋結果，或網頁載入過慢。");
       return [];
     }
     const results = await page.evaluate((platform) => {
-      const rows = Array.from(document.querySelectorAll("table.ordertable tr")).slice(1);
-      if (rows.length === 0) return [];
-      return rows.map((row) => {
+      const nameElements = document.querySelectorAll(".name-ingredient");
+      if (nameElements.length === 0) return [];
+      const products = [];
+      nameElements.forEach((nameEl) => {
         var _a, _b;
-        const cols = row.querySelectorAll("td");
-        if (cols.length < 5) return null;
-        const nameAndIngredient = ((_a = cols[2]) == null ? void 0 : _a.innerText.trim()) || "";
-        const name = nameAndIngredient.split("\n")[0];
-        const spec = nameAndIngredient.split("\n")[1] || "";
-        const statusText = ((_b = cols[3]) == null ? void 0 : _b.innerText.trim()) || "";
-        const priceMatch = statusText.match(/([\d,.]+)\s*\/\s*(.+)/);
-        const price = priceMatch ? parseFloat(priceMatch[1].replace(/,/g, "")) : 0;
-        const unit = priceMatch ? priceMatch[2].trim() : "";
-        const stockMatch = statusText.match(/(\d+)/);
-        const stock = stockMatch ? stockMatch[1] : "未知";
-        return {
+        const row = nameEl.parentElement;
+        if (!row) return;
+        const nameH3 = nameEl.querySelector("h3");
+        if (!nameH3) return;
+        const name = nameH3.innerText.trim();
+        const fullText = nameEl.innerText || "";
+        const otherLines = fullText.split("\n").map((l) => l.trim()).filter((l) => l && l !== name);
+        const spec = otherLines[0] || "";
+        const memo = otherLines.slice(1).join(" ");
+        const nhiEl = row.querySelector(".nhi");
+        const nhiText = (nhiEl == null ? void 0 : nhiEl.innerText) || "";
+        const nhiCodeMatch = nhiText.match(/[A-Z0-9]{10}/);
+        const nhiCode = nhiCodeMatch ? nhiCodeMatch[0] : "";
+        const nhiPriceMatch = nhiText.match(/健保價：\s*([\d,.]+)/);
+        const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, "")) : 0;
+        const priceEl = row.querySelector(".price");
+        const unitEl = row.querySelector(".unit");
+        let price = 0;
+        let unit = "";
+        if (priceEl) {
+          price = parseFloat(priceEl.innerText.replace(/[^0-9.]/g, ""));
+        }
+        if (unitEl) {
+          unit = unitEl.innerText.replace(/[\/\s]/g, "").trim();
+        } else {
+          const statusText2 = ((_a = row.querySelector(".stock-price-unit")) == null ? void 0 : _a.innerText) || "";
+          const priceMatch = statusText2.match(/([\d,.]+)\s*\/\s*([^\n\s]+)/);
+          unit = priceMatch ? priceMatch[2].trim() : "單位";
+        }
+        const statusText = ((_b = row.querySelector(".stock-price-unit")) == null ? void 0 : _b.innerText) || "";
+        const stockStatus = statusText.split("\n")[0] || "未知";
+        const expiry = "";
+        if (name === "品名 / 成份") return;
+        products.push({
           platform,
           name,
           spec,
           price: isNaN(price) ? 0 : price,
-          unit,
-          stock,
-          link: window.location.href
-        };
-      }).filter((r) => r !== null && r.name);
+          unit: unit || "單位",
+          stock: stockStatus,
+          link: window.location.href,
+          expiry,
+          memo,
+          nhiCode,
+          nhiPrice: isNaN(nhiPrice) ? 0 : nhiPrice
+        });
+      });
+      return products;
     }, this.platformName);
     console.log(`[BinLi] Scraped ${results.length} products.`);
     return results;
@@ -269,51 +301,63 @@ class ChahwaConnector extends Connector {
       console.log(`[嘉鏵] 執行極速貼上 -> 欄位: ${targetSelector}`);
       await this.fastType(page, targetSelector, searchTerm);
       await page.keyboard.press("Enter");
-      await page.waitForSelector("tr:has(a.grpt)", { timeout: 8e3 });
+      await page.waitForSelector(".item", { timeout: 1e4 });
+      await page.waitForTimeout(2e3);
     };
     try {
       await performSearchStep();
     } catch (e) {
-      console.log("[嘉鏵] 搜尋超時或未見結果，開始進行「曼達特式」Session 完整性校對...");
+      console.log("[嘉鏵] 搜尋超時或未見結果，檢查是否 Session 失效...");
       if (!await this.isLoggedIn(page)) {
-        console.log("[嘉鏵] 確認 Session 已過期，啟動補登救援程序...");
         if (this.savedCreds) {
           const loginSuccess = await this.login(page, this.savedCreds);
           if (loginSuccess) {
-            console.log("[嘉鏵] 補登成功！自動重啟搜尋流程...");
-            try {
-              await performSearchStep();
-            } catch (retryErr) {
-              console.log("[嘉鏵] 重試後仍無結果，判定為無商品。");
-              return [];
-            }
+            await performSearchStep();
           }
         }
       } else {
-        console.log("[嘉鏵] Session 仍有效，判定該關鍵字確實無搜尋結果。");
         return [];
       }
     }
     const results = await page.evaluate((platform) => {
-      const rows = Array.from(document.querySelectorAll("tr:has(a.grpt)"));
-      return rows.map((row) => {
-        var _a;
-        const nameEl = row.querySelector("a.grpt");
-        if (!nameEl) return null;
-        const rowText = row.innerText || "";
-        const priceEl = row.querySelector('font[color="red"], span.red, .red');
-        const priceText = (priceEl == null ? void 0 : priceEl.innerText.replace(/[^0-9.]/g, "")) || "0";
-        const price = parseFloat(priceText);
-        return {
-          platform,
-          name: nameEl.innerText.trim(),
-          spec: ((_a = rowText.match(/\d+[\u4e00-\u9fa5]+\/\w+/)) == null ? void 0 : _a[0]) || "N/A",
-          price: isNaN(price) ? 0 : price,
-          unit: "P",
-          stock: rowText.includes("有貨") ? "有貨" : "缺貨",
-          link: nameEl.href || window.location.href
-        };
-      }).filter((r) => r !== null);
+      const items = document.querySelectorAll(".item");
+      if (items.length === 0) return [];
+      const products = [];
+      items.forEach((item) => {
+        var _a, _b, _c;
+        const specEl = item.querySelector(".spec");
+        if (!specEl) return;
+        const specLines = specEl.innerText.split("\n").map((l) => l.trim()).filter(Boolean);
+        const name = specLines[2] || specLines[0] || "";
+        const nhiCode = ((_b = (_a = specLines[0]) == null ? void 0 : _a.match(/[A-Z0-9]{10}/)) == null ? void 0 : _b[0]) || "";
+        const nhiPriceMatch = (_c = specLines[1]) == null ? void 0 : _c.match(/健保價:\s*([\d,.]+)/);
+        const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, "")) : 0;
+        const stockIndex = specLines.findIndex((l) => l.includes("庫存"));
+        const priceLine = stockIndex > 0 ? specLines[stockIndex - 1] : "";
+        const priceMatch = priceLine.match(/([\d,.]+)\s*\/\s*([^\n\s]+)/);
+        const price = priceMatch ? parseFloat(priceMatch[1].replace(/,/g, "")) : 0;
+        const unit = priceMatch ? priceMatch[2].trim() : priceLine.includes("/") ? priceLine.split("/")[1].trim() : "單位";
+        const stockStatus = stockIndex >= 0 ? specLines[stockIndex].replace("庫存:", "").trim() : "未知";
+        const itemText = item.innerText || "";
+        const expiryMatch = itemText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+        const expiry = expiryMatch ? expiryMatch[0] : "";
+        if (name && name !== "品名(中英)") {
+          products.push({
+            platform,
+            name,
+            spec: specLines[3] || "",
+            price: isNaN(price) ? 0 : price,
+            unit,
+            stock: stockStatus,
+            link: window.location.href,
+            expiry,
+            memo: "",
+            nhiCode,
+            nhiPrice: isNaN(nhiPrice) ? 0 : nhiPrice
+          });
+        }
+      });
+      return products;
     }, this.platformName);
     console.log(`[Chahwa] Scraped ${results.length} products.`);
     return results;
@@ -398,10 +442,9 @@ class JhaoHongConnector extends Connector {
         }
         console.log("[兆宇] 執行極速貼入搜尋關鍵字...");
         await this.fastType(page, "input.search", searchTerm);
-        await page.keyboard.press("Enter");
-        const btn = await page.$("button.multi.search");
-        if (btn) {
-          await btn.click();
+        const searchBtn = await page.$('button.multi.search, .multi.search, button:has-text("搜尋")');
+        if (searchBtn) {
+          await searchBtn.click();
         } else {
           await page.keyboard.press("Enter");
         }
@@ -410,45 +453,89 @@ class JhaoHongConnector extends Connector {
       }
       await page.waitForTimeout(2500);
     } catch (e) {
-      console.warn("[JhaoHong] Interaction failed:", e);
-      return [];
+      return [{
+        platform: this.platformName,
+        name: "❌ 兆宇操作攔截: " + String(e),
+        spec: "ERROR",
+        price: 0,
+        unit: "ERR",
+        stock: "請檢查步驟",
+        link: page.url()
+      }];
     }
     const postAlert = await page.$("button.confirm.button");
     if (postAlert) {
       await postAlert.click();
       await page.waitForTimeout(500);
     }
-    console.log("[JhaoHong] Waiting for product items...");
+    console.log("[JhaoHong] Waiting for content to appear...");
     try {
-      await page.waitForSelector("ul.items li .inner", { timeout: 8e3 });
+      await page.waitForFunction(() => {
+        const t = document.body.innerText;
+        return t.includes("健保") || t.includes("產品列表") || t.includes("搜尋結果");
+      }, { timeout: 12e3 });
+      await page.waitForTimeout(2e3);
     } catch (e) {
-      console.log("[JhaoHong] No products found after search.");
-      return [];
+      return [{
+        platform: this.platformName,
+        name: "⚠️ 兆宇超時：等不到搜尋結果 (網址: " + page.url().split("/").pop() + ")",
+        spec: "TIMEOUT",
+        price: 0,
+        unit: "WAIT",
+        stock: "請確認畫面",
+        link: page.url()
+      }];
     }
-    await page.evaluate((platform) => {
-      const items = Array.from(document.querySelectorAll("ul.items li .inner"));
-      if (items.length === 0) return [];
-      return items.map((item) => {
-        const nameEl = item.querySelector(".product.ingredients h3");
-        const priceEl = item.querySelector(".price.unit.R .p");
-        const unitEl = item.querySelector(".price.unit.R .u");
-        const stockEl = item.querySelector(".controlled-drugs.stock.C .s");
-        const specEl = item.querySelector(".validity");
-        if (!nameEl) return null;
-        const priceText = (priceEl == null ? void 0 : priceEl.innerText.replace(/[^0-9.]/g, "")) || "0";
-        const price = parseFloat(priceText);
-        return {
-          platform,
-          name: nameEl.innerText.trim(),
-          spec: (specEl == null ? void 0 : specEl.innerText.trim()) || "",
-          price: isNaN(price) ? 0 : price,
-          unit: (unitEl == null ? void 0 : unitEl.innerText.trim().replace("/", "")) || "P",
-          stock: (stockEl == null ? void 0 : stockEl.innerText.trim()) || "未知",
-          link: window.location.href
-        };
-      }).filter((r) => r !== null);
+    const results = await page.evaluate((platform) => {
+      try {
+        const cards = Array.from(document.querySelectorAll("li.item, .item"));
+        if (cards.length === 0) return [];
+        return cards.map((card) => {
+          const nameEl = card.querySelector("h3");
+          const name = nameEl ? nameEl.innerText.trim() : "未知藥品";
+          const codeEl = card.querySelector(".code.above, .code");
+          const nhiCode = codeEl ? codeEl.innerText.trim() : "";
+          const nhiPriceEl = card.querySelector(".red");
+          const nhiPriceText = nhiPriceEl ? nhiPriceEl.innerText.replace(/[^0-9.]/g, "") : "0";
+          const nhiPrice = parseFloat(nhiPriceText) || 0;
+          const validityEl = card.querySelector(".validity");
+          const expiry = validityEl ? validityEl.innerText.replace(/效期\s*[:：]\s*/, "").trim() : "";
+          const priceEl = card.querySelector(".p");
+          const priceText = priceEl ? priceEl.innerText.replace(/[^0-9.]/g, "") : "0";
+          const price = parseFloat(priceText) || 0;
+          const unitEl = card.querySelector(".u");
+          const unit = unitEl ? unitEl.innerText.replace(/\//, "").trim() : "單位";
+          const stockEl = card.querySelector(".s");
+          const stockText = stockEl ? stockEl.innerText.trim() : "";
+          const isOutOfStock = stockText.includes("缺貨") || stockText.includes("售完") || card.classList.contains("out");
+          const stockStatus = isOutOfStock ? "缺貨中" : stockText || "有供貨";
+          let unitPrice = void 0;
+          const sizeMatch = name.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入)/i);
+          if (sizeMatch && price > 0) {
+            const size = parseInt(sizeMatch[1]);
+            if (size > 0) {
+              unitPrice = Math.round(price / size * 100) / 100;
+            }
+          }
+          return {
+            platform,
+            name,
+            spec: "",
+            price,
+            unit,
+            unitPrice,
+            stock: stockStatus,
+            link: window.location.href,
+            expiry,
+            nhiCode,
+            nhiPrice
+          };
+        });
+      } catch (err) {
+        return [];
+      }
     }, this.platformName);
-    return [];
+    return results;
   }
 }
 class YesChainConnector extends Connector {
@@ -456,100 +543,112 @@ class YesChainConnector extends Connector {
     super(context);
     __publicField(this, "platformId", "yeschain");
     __publicField(this, "platformName", "好鄰居 (躍獅)");
-    __publicField(this, "baseUrl", "https://www.yeschain.com.tw/b2bStoreCart/login");
+    __publicField(this, "baseUrl", "https://www.yeschain.com.tw/b2bStoreCart/home");
     __publicField(this, "context");
     this.context = context;
   }
   async isLoggedIn(page) {
     try {
-      const bodyText = await page.textContent("body");
-      const hasIndicators = (bodyText == null ? void 0 : bodyText.includes("登出")) || (bodyText == null ? void 0 : bodyText.includes("歡迎您"));
-      const url = page.url();
-      const isLoggedIn = hasIndicators || !url.includes("b2bStoreCart/login") && (url.includes("b2bStoreCart/") || url.includes("order") || url.includes("prod") || url.includes("otcProd"));
-      console.log(`[好鄰居] 登入狀態檢查: ${isLoggedIn}`);
-      return isLoggedIn;
+      const cookies = await this.context.cookies();
+      const hasSession = cookies.some((c) => c.name.toLowerCase().includes("session") || c.name.includes("token"));
+      const url2 = page.url();
+      if (url2.includes("/login") || url2.endsWith("/home")) {
+        const hasEmailInput = await page.$("#email");
+        if (hasEmailInput) return false;
+      }
+      return hasSession || false;
     } catch (e) {
       return false;
     }
   }
   async login(page, creds) {
-    console.log("[好鄰居] 正在導向登入頁面...");
-    await page.goto(this.baseUrl, { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(1e3);
+    await page.goto(this.baseUrl, { waitUntil: "networkidle" });
     if (await this.isLoggedIn(page)) return true;
-    console.log("[好鄰居] 正在輸入帳密 (擬人化)...");
-    await this.humanType(page, "input#email", creds.username);
-    await this.humanType(page, "input#password", creds.password);
     try {
-      console.log("[好鄰居] 請在視窗中輸入驗證碼並登入 (監控中，無需手動關閉提示)...");
-      await page.waitForFunction(() => {
-        const text = document.body.innerText;
-        const url = window.location.href;
-        return url.includes("otcProd") || url.includes("prod") || url.includes("Product") || text.includes("登入成功") || text.includes("歡迎您") || document.querySelector("input#password") === null;
-      }, { timeout: 3e5 });
-      console.log("[好鄰居] 偵測到成功訊號，正在跳轉至 otcProd...");
-      await page.goto("https://www.yeschain.com.tw/b2bStoreCart/otcProd", { waitUntil: "domcontentloaded" });
+      console.log("[好鄰居] 正在填入帳號密碼...");
+      await page.waitForSelector("#email", { timeout: 5e3 });
+      await this.humanType(page, "#email", creds.username);
+      await this.humanType(page, "#password", creds.password);
+      const hasCaptcha = await page.$("#rcode");
+      if (hasCaptcha) {
+        console.log("[好鄰居] 偵測到驗證碼，請手動輸入並點擊登入...");
+        for (let i = 0; i < 300; i++) {
+          if (await this.isLoggedIn(page)) {
+            console.log("[好鄰居] 成功感應到登入憑證！");
+            return true;
+          }
+          await page.waitForTimeout(1e3);
+        }
+      } else {
+        await page.click('button:has-text("登入")');
+        await page.waitForTimeout(2e3);
+      }
     } catch (e) {
+      console.log("[好鄰居] 登入過程發生錯誤:", e);
     }
-    return true;
+    return await this.isLoggedIn(page);
   }
   async search(page, searchTerm) {
-    console.log(`[好鄰居] 正準備搜尋: "${searchTerm}"`);
-    const isCode = this.isNHICode(searchTerm);
-    const fieldName = isCode ? "健保碼" : "品名";
-    const targetUrl = isCode ? "https://www.yeschain.com.tw/b2bStoreCart/prod" : "https://www.yeschain.com.tw/b2bStoreCart/otcProd";
-    const targetSelector = isCode ? 'input[placeholder*="健保碼至少5個字"]' : 'input[placeholder*="品名至少2個字"]';
-    console.log(`[好鄰居] ===============================`);
-    console.log(`[好鄰居] 判定結果: ${fieldName}`);
-    console.log(`[好鄰居] 目標頁面: ${targetUrl}`);
-    console.log(`[好鄰居] 動作: 填入 ${fieldName} 欄位 (${targetSelector})`);
-    console.log(`[好鄰居] ===============================`);
-    if (!page.url().includes(isCode ? "b2bStoreCart/prod" : "b2bStoreCart/otcProd")) {
-      console.log(`[好鄰居] 導航至 ${fieldName} 搜尋頁...`);
-      await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
-    }
     try {
-      await page.waitForSelector(targetSelector, { timeout: 8e3 });
-      console.log(`[好鄰居] 執行極速貼入 -> 欄位: ${targetSelector}`);
-      await this.fastType(page, targetSelector, searchTerm);
-      console.log("[好鄰居] 輸入完成，執行 Enter 鍵觸發搜尋...");
-      await page.keyboard.press("Enter");
-      await page.waitForTimeout(500);
-      const queryBtn = page.locator(targetSelector).locator("xpath=following-sibling::button | following-sibling::span//button").first();
-      if (await queryBtn.isVisible()) {
-        console.log("[好鄰居] 執行局部精確點擊搜尋鈕...");
-        await queryBtn.click({ delay: 100 });
-      }
-      console.log("[好鄰居] 等待搜尋結果載入...");
-      await page.waitForTimeout(2e3);
+      console.log("[好鄰居] 正在強制跳轉至產品搜尋頁面...");
+      await page.goto("https://www.yeschain.com.tw/b2bStoreCart/prod", { waitUntil: "networkidle" });
+      const searchInput = 'input[placeholder*="商品"]';
+      await page.waitForSelector(searchInput, { timeout: 1e4 });
+      console.log(`[好鄰居] 執行搜尋: "${searchTerm}"`);
+      await this.fastType(page, searchInput, searchTerm);
+      await page.click('button:has-text("查詢")');
+      await page.waitForTimeout(2500);
     } catch (e) {
-      console.warn(`[好鄰居] ${fieldName} 搜尋流程發生異常:`, e);
+      console.log("[好鄰居] 搜尋動作失敗:", e);
       return [];
     }
     const results = await page.evaluate((platform) => {
-      const items = Array.from(document.querySelectorAll("tbody tr"));
-      return items.map((item) => {
-        var _a;
-        const nameEl = item.querySelector("td:nth-child(4)");
-        const priceSelect = item.querySelector("select");
-        const specEl = item.querySelector("td:nth-child(6)");
-        if (!nameEl) return null;
-        let price = 0;
-        if (priceSelect && priceSelect.options.length > 0) {
-          const priceText = ((_a = priceSelect.options[priceSelect.selectedIndex]) == null ? void 0 : _a.text) || "";
-          const match = priceText.match(/[\d,]+/);
-          if (match) price = parseFloat(match[0].replace(/,/g, ""));
-        }
-        return {
-          platform,
-          name: nameEl.innerText.trim(),
-          spec: (specEl == null ? void 0 : specEl.innerText.trim()) || "",
-          price,
-          unit: "P",
-          stock: item.innerText.includes("缺貨") ? "缺貨" : "有貨",
-          link: window.location.href
-        };
-      }).filter((r) => r !== null && r.price > 0);
+      try {
+        const rows = Array.from(document.querySelectorAll("tr")).filter((tr) => {
+          return tr.innerText.includes("NT$") || /[A-Z0-9]{10}/.test(tr.innerText);
+        });
+        return rows.map((row) => {
+          var _a, _b, _c;
+          const pTags = Array.from(row.querySelectorAll("p"));
+          const pTexts = pTags.map((p) => p.innerText.trim());
+          const nhiCode = pTexts.find((t) => /^[A-Z0-9]{10}$/.test(t)) || "";
+          const nhiPriceText = pTexts.find((t) => t.includes("NT$") && t.length < 15) || "";
+          const nhiPrice = parseFloat(nhiPriceText.replace(/[^0-9.]/g, "")) || 0;
+          const nameParts = pTexts.filter(
+            (t) => t.length > 5 && !/^[A-Z0-9]{10}$/.test(t) && !t.includes("NT$") && !t.includes("粒/盒")
+          );
+          const name = nameParts.join(" ") || "未知藥品";
+          const optionEl = row.querySelector("option");
+          const priceText = optionEl ? optionEl.innerText.trim() : pTexts.find((t) => t.includes("NT$") && t.length > 15) || "";
+          const price = parseFloat(((_b = (_a = priceText.match(/NT\$\s*([\d,.]+)/)) == null ? void 0 : _a[1]) == null ? void 0 : _b.replace(/,/g, "")) || "0");
+          const unit = ((_c = priceText.split("/").pop()) == null ? void 0 : _c.trim()) || "單位";
+          const stockEl = row.querySelector("span.font-bold");
+          const stock = stockEl ? stockEl.innerText.trim() : "有貨";
+          const expiryMatch = row.innerText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+          const expiry = expiryMatch ? expiryMatch[1] : "";
+          let unitPrice = void 0;
+          const sizeMatch = row.innerText.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
+          if (sizeMatch && price > 0) {
+            const size = parseInt(sizeMatch[1]);
+            if (size > 0) unitPrice = Math.round(price / size * 100) / 100;
+          }
+          return {
+            platform,
+            name,
+            spec: "",
+            price,
+            unit,
+            unitPrice,
+            stock,
+            link: window.location.href,
+            expiry,
+            nhiCode,
+            nhiPrice
+          };
+        });
+      } catch (e) {
+        return [];
+      }
     }, this.platformName);
     return results;
   }
@@ -603,42 +702,66 @@ class YuShengConnector extends Connector {
     return await this.isLoggedIn(page);
   }
   async search(page, searchTerm) {
-    var _a, _b, _c;
     console.log(`[宇盛] 正準備發動搜尋: "${searchTerm}"`);
     try {
       await page.goto("https://www.yusheng0307.com/product.html", { waitUntil: "networkidle" });
       console.log("[宇盛] 執行極速貼入搜尋...");
       await this.fastType(page, 'input[name="keyword"]', searchTerm);
       await page.keyboard.press("Enter");
-      await page.waitForSelector("div.row.border.rounded", { timeout: 1e4 });
+      await page.waitForSelector("a.text-info, .text-outofstock", { timeout: 8e3 });
+      await page.waitForTimeout(1500);
     } catch (e) {
-      console.log("[宇盛] 搜尋無結果:", e);
+      console.log("[宇盛] 搜尋逾時或無結果");
       return [];
     }
-    const results = [];
-    const cards = await page.$$("div.row.border.rounded.mb-3");
-    for (const card of cards) {
+    const results = await page.evaluate((platform) => {
       try {
-        const name = ((_a = await card.$eval("p.fw-bolder.mb-0", (el) => el.textContent)) == null ? void 0 : _a.trim()) || "";
-        const nhiCode = ((_b = await card.$eval("a.hvr-grow", (el) => el.textContent)) == null ? void 0 : _b.trim()) || "";
-        const priceText = ((_c = await card.$eval("span.fw-bolder.fs-5.text-primary", (el) => el.textContent)) == null ? void 0 : _c.trim()) || "";
-        const priceMatch = priceText.match(/(\d+)\s*\/\s*(.+)/);
-        const priceValue = priceMatch ? parseInt(priceMatch[1]) : 0;
-        const unitValue = priceMatch ? priceMatch[2].trim() : "";
-        const isOutOfStock = await card.$(".text-outofstock") !== null;
-        const stockStatus = isOutOfStock ? "缺貨中" : "供貨中";
-        results.push({
-          platform: "宇盛",
-          name,
-          spec: nhiCode ? `[${nhiCode}]` : "",
-          price: priceValue,
-          unit: unitValue,
-          stock: stockStatus
+        const rows = Array.from(document.querySelectorAll("li.d-lg-block")).filter((row) => {
+          return row.querySelector("a.text-info") !== null && !row.innerText.includes("產品圖");
+        });
+        if (rows.length === 0) return [];
+        return rows.map((row) => {
+          var _a;
+          const rowText = row.innerText;
+          const nameEl = row.querySelector(".fw-bolder");
+          const name = nameEl ? nameEl.innerText.trim() : "未知藥品";
+          const nhiEl = row.querySelector("a.text-info");
+          const nhiCode = nhiEl ? nhiEl.innerText.trim() : "";
+          const nhiPriceMatch = rowText.match(/健保價\s*[:：]\s*([\d,.]+)/);
+          const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, "")) : 0;
+          const priceEl = row.querySelector("span.fs-5");
+          const price = priceEl ? parseFloat(priceEl.innerText.replace(/[^0-9.]/g, "")) : 0;
+          const priceAreaText = ((_a = priceEl == null ? void 0 : priceEl.parentElement) == null ? void 0 : _a.innerText) || "";
+          const unitMatch = priceAreaText.match(/\/\s*([^\n\s：:]+)/);
+          const unit = unitMatch ? unitMatch[1].trim() : "單位";
+          const isOutOfStock = row.querySelector(".text-outofstock") !== null;
+          const stock = isOutOfStock ? "缺貨中" : "有供貨";
+          const expiryMatch = rowText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+          const expiry = expiryMatch ? expiryMatch[1] : "";
+          let unitPrice = void 0;
+          const sizeMatch = name.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
+          if (sizeMatch && price > 0) {
+            const size = parseInt(sizeMatch[1]);
+            if (size > 0) unitPrice = Math.round(price / size * 100) / 100;
+          }
+          return {
+            platform,
+            name,
+            spec: "",
+            price,
+            unit,
+            unitPrice,
+            stock,
+            link: window.location.href,
+            expiry,
+            nhiCode,
+            nhiPrice
+          };
         });
       } catch (e) {
-        continue;
+        return [];
       }
-    }
+    }, this.platformName);
     return results;
   }
 }
@@ -668,8 +791,8 @@ class MDTConnector extends Connector {
     try {
       console.log("[蔓達特] 等待手動登入成功...");
       await page.waitForFunction(() => {
-        const url = window.location.href;
-        return url.includes("mdtky.com.tw/Shop/") || url.includes("Product/Search") || url === "https://www.mdtky.com.tw/";
+        const url2 = window.location.href;
+        return url2.includes("mdtky.com.tw/Shop/") || url2.includes("Product/Search") || url2 === "https://www.mdtky.com.tw/";
       }, { timeout: 3e5 });
       console.log("[蔓達特] 偵測到登入成功，正在跳轉至產品搜尋頁面...");
       await page.goto("https://www.mdtky.com.tw/Shop/Product/", { waitUntil: "domcontentloaded" });
@@ -693,32 +816,54 @@ class MDTConnector extends Connector {
       } else {
         await page.keyboard.press("Enter");
       }
-      await page.waitForSelector(".productBox", { timeout: 8e3 });
+      await page.waitForSelector("li, .productBox", { timeout: 8e3 });
+      await page.waitForTimeout(1e3);
     } catch (e) {
       console.warn("[蔓達特] 搜尋過程中發生錯誤:", e);
       return [];
     }
     const results = await page.evaluate((platform) => {
-      const boxes = Array.from(document.querySelectorAll(".productBox"));
-      return boxes.map((box) => {
-        const nameEl = box.querySelector(".productTitle");
-        const priceEl = box.querySelector(".wd");
-        const specEl = box.querySelector(".spec");
-        if (!nameEl) return null;
-        const name = nameEl.innerText.trim();
-        const priceText = (priceEl == null ? void 0 : priceEl.innerText.replace(/[^0-9.]/g, "")) || "0";
+      const cards = Array.from(document.querySelectorAll("li, .pdConList, .pdList, .chessboardList")).filter((el) => {
+        const text = el.innerText;
+        return (text.includes("$") || text.includes("售完") || text.includes("補貨中")) && el.offsetWidth > 150;
+      });
+      return cards.map((card) => {
+        var _a;
+        const text = card.innerText;
+        const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+        const nhiMatch = text.match(/[A-Z0-9]{10}/);
+        const nhiCode = nhiMatch ? nhiMatch[0] : "";
+        const nhiPriceMatch = text.match(/健保價\s*[:：]\s*([\d,.]+)/);
+        const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, "")) : 0;
+        let name = lines[0] || "未知藥名";
+        if (/^[0-9A-Z]+$/.test(name) && lines[1]) {
+          name = lines[1];
+        }
+        const specIndex = lines.findIndex((l) => l === name) + 1;
+        const spec = specIndex > 0 && lines[specIndex] && !lines[specIndex].includes("$") ? lines[specIndex] : "";
+        const priceLineIndex = lines.findIndex((l) => l.includes("$"));
+        const priceText = priceLineIndex >= 0 ? lines[priceLineIndex].replace(/[^0-9.]/g, "") : "0";
         const price = parseFloat(priceText);
+        const unitMatch = (_a = lines[priceLineIndex]) == null ? void 0 : _a.match(/\$\s*[\d,.]+\s*([^\n\s]+)/);
+        const unit = unitMatch ? unitMatch[1] : priceLineIndex >= 0 && lines[priceLineIndex + 1] ? lines[priceLineIndex + 1] : "單位";
+        const expiryMatch = text.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+        const expiry = expiryMatch ? expiryMatch[0] : "";
+        const isOutOfStock = text.includes("售完") || text.includes("缺貨") || text.includes("補貨中");
+        const stockStatus = isOutOfStock ? "售完/缺貨" : "有供貨";
         return {
           platform,
           name,
-          spec: (specEl == null ? void 0 : specEl.innerText.trim()) || "",
+          spec,
           price: isNaN(price) ? 0 : price,
-          unit: "P",
-          stock: "有貨",
-          // 蔓達特顯示在列表中通常代表有貨
-          link: window.location.href
+          unit,
+          stock: stockStatus,
+          link: window.location.href,
+          expiry,
+          memo: "",
+          nhiCode,
+          nhiPrice: isNaN(nhiPrice) ? 0 : nhiPrice
         };
-      }).filter((r) => r !== null);
+      });
     }, this.platformName);
     return results;
   }
@@ -735,8 +880,8 @@ class CodaConnector extends Connector {
   // ── Session check ──────────────────────────────────────────────
   async isLoggedIn(page) {
     try {
-      const url = page.url();
-      return url.includes("/Home/Index") || url.includes("/Product/") || url.includes("/Order/");
+      const url2 = page.url();
+      return url2.includes("/Home/Index") || url2.includes("/Product/") || url2.includes("/Order/");
     } catch (e) {
       return false;
     }
@@ -752,8 +897,8 @@ class CodaConnector extends Connector {
     await page.click("input#Submit");
     try {
       await page.waitForFunction(() => {
-        const url = window.location.href;
-        return url.includes("/Home/Index") || url.includes("/Product/");
+        const url2 = window.location.href;
+        return url2.includes("/Home/Index") || url2.includes("/Product/");
       }, { timeout: 15e3 });
     } catch (e) {
       console.warn("[可達] 登入跳轉緩慢，繼續嘗試下一步...");
@@ -779,39 +924,42 @@ class CodaConnector extends Connector {
       console.warn("[可達] 搜尋控制項操作失靈:", e);
       return [];
     }
-    await page.evaluate((platform) => {
-      const items = Array.from(document.querySelectorAll("a.item"));
+    const results = await page.evaluate((platform) => {
+      const items = Array.from(document.querySelectorAll("a.item, .item"));
       return items.map((item) => {
-        var _a, _b, _c, _d, _e, _f, _g;
-        const tbl = item.querySelector("table");
-        if (!tbl) return null;
-        const rows = tbl.querySelectorAll("tr");
-        const row1cols = (_a = rows[0]) == null ? void 0 : _a.querySelectorAll("td");
-        const stockEl = (_b = row1cols == null ? void 0 : row1cols[1]) == null ? void 0 : _b.querySelector("label");
-        const stock = (stockEl == null ? void 0 : stockEl.innerText.trim()) || "未知";
-        const row2cols = (_c = rows[1]) == null ? void 0 : _c.querySelectorAll("td");
-        const nameEl = (_d = row2cols == null ? void 0 : row2cols[0]) == null ? void 0 : _d.querySelector("label");
-        const priceEl = (_e = row2cols == null ? void 0 : row2cols[1]) == null ? void 0 : _e.querySelector("label");
-        const priceRaw = (priceEl == null ? void 0 : priceEl.innerText.trim()) || "0";
-        const priceMatch = priceRaw.match(/[\d,]+(\.\d+)?/);
-        const price = priceMatch ? parseFloat(priceMatch[0].replace(/,/g, "")) : 0;
-        const row3cols = (_f = rows[2]) == null ? void 0 : _f.querySelectorAll("td");
-        const row3text = ((_g = row3cols == null ? void 0 : row3cols[0]) == null ? void 0 : _g.innerText) || "";
-        const unitMatch = row3text.match(/單位[：:]\s*(\S+)/);
-        const unit = (unitMatch == null ? void 0 : unitMatch[1]) || "P";
-        const nhiCode = row3text.replace(/單位[：:]\s*\S+/, "").trim();
+        var _a;
+        const text = item.innerText;
+        if (!text.includes("藥品名稱")) return null;
+        const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+        const nhiCodeMatch = text.match(/健保碼[：:]\s*([A-Z0-9]{10})/);
+        const nhiCode = nhiCodeMatch ? nhiCodeMatch[1] : "";
+        const nhiPriceMatch = text.match(/健保價[：:]\s*([\d,.]+)/);
+        const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, "")) : 0;
+        const nameMatch = text.match(/藥品名稱[：:]\s*([^\n]+)/);
+        const name = nameMatch ? nameMatch[1].trim() : lines[2] || "未知藥品";
+        const pricePatternMatch = text.match(/([\d,.]+)\s*\/\s*([\d,.]+)/);
+        const price = pricePatternMatch ? parseFloat(pricePatternMatch[1].replace(/,/g, "")) : 0;
+        const unitPrice = pricePatternMatch ? parseFloat(pricePatternMatch[2].replace(/,/g, "")) : 0;
+        const unitMatch = text.match(/單位[：:]\s*(\S+)/);
+        const unit = unitMatch ? unitMatch[1] : "單位";
+        const isOutOfStock = text.includes("缺貨") || text.includes("售完");
+        const stockStatus = isOutOfStock ? "缺貨中" : "有庫存";
         return {
           platform,
-          name: (nameEl == null ? void 0 : nameEl.innerText.trim()) || "未知藥品",
-          spec: nhiCode,
-          price,
+          name,
+          spec: ((_a = lines[0]) == null ? void 0 : _a.replace("藥品編號:", "").trim()) || "",
+          price: isNaN(price) ? 0 : price,
+          unitPrice: isNaN(unitPrice) ? 0 : unitPrice,
           unit,
-          stock,
-          link: item.href || window.location.href
+          stock: stockStatus,
+          link: item.href || window.location.href,
+          expiry: "",
+          nhiCode,
+          nhiPrice: isNaN(nhiPrice) ? 0 : nhiPrice
         };
       }).filter((r) => r !== null);
     }, this.platformName);
-    return [];
+    return results;
   }
 }
 class YCConnector extends Connector {
@@ -851,60 +999,77 @@ class YCConnector extends Connector {
     if (!page.url().includes("/product/all/index.html")) {
       await page.goto(`${this.baseUrl}/product/all/index.html`, { waitUntil: "domcontentloaded" });
     }
-    if (page.url().includes("login") || !await this.isLoggedIn(page)) {
-      console.log("[YC] Not logged in or session expired, skipping search.");
-      return [];
-    }
-    console.log(`[益全] 正準備搜尋: "${searchTerm}"`);
-    const isCode = this.isNHICode(searchTerm);
-    const targetSelector = isCode ? 'input[name="code"]' : 'input[name="product_name"]';
-    const fieldName = isCode ? "健保碼" : "品名";
-    console.log(`[益全] ===============================`);
-    console.log(`[益全] 關鍵字: "${searchTerm}"`);
-    console.log(`[益全] 判定結果: ${fieldName}`);
-    console.log(`[益全] 動作: 填入 ${fieldName} 欄位 (${targetSelector})`);
-    console.log(`[益全] ===============================`);
-    await page.waitForSelector(targetSelector);
-    console.log(`[益全] 執行極速貼配 -> 欄位: ${targetSelector}`);
-    await this.fastType(page, targetSelector, searchTerm);
-    await page.keyboard.press("Enter");
-    await page.click("button.btn-primary.btn-block");
-    console.log("[YC] Waiting for results...");
     try {
-      await page.waitForSelector(".thumbnail", { timeout: 8e3 });
+      const isCode = this.isNHICode(searchTerm);
+      const targetSelector = isCode ? 'input[name="code"]' : 'input[name="product_name"]';
+      await page.waitForSelector(targetSelector, { timeout: 5e3 });
+      await this.fastType(page, targetSelector, searchTerm);
+      await page.keyboard.press("Enter");
+      const searchBtn = await page.$('button.btn-primary.btn-block, button:has-text("搜尋")');
+      if (searchBtn) await searchBtn.click();
+      await page.waitForTimeout(2e3);
     } catch (e) {
-      console.log("[YC] Timeout waiting for results or no matches found.");
-      return [];
+      console.warn("[YC] Search interaction failed");
     }
     const results = await page.evaluate((platform) => {
-      const items = Array.from(document.querySelectorAll(".thumbnail"));
-      if (items.length === 0) return [];
-      return items.map((item) => {
-        const titleEl = item.querySelector(".thumbnail-title a");
-        if (!titleEl) return null;
-        const name = titleEl.innerText.trim();
-        const link = titleEl.href;
-        const contentEl = item.querySelector(".thumbnail-content");
-        const contentText = (contentEl == null ? void 0 : contentEl.innerText) || "";
-        const priceMatch = contentText.match(/售價：\$([\d,.]+)/);
-        const price = priceMatch ? parseFloat(priceMatch[1].replace(/,/g, "")) : 0;
-        const stockMatch = contentText.match(/庫存：(\d+)/);
-        const stock = stockMatch ? stockMatch[1] : "未知";
-        const mfgMatch = contentText.match(/製造商：(.+)/);
-        const spec = mfgMatch ? mfgMatch[1].trim() : "";
+      const bodyText = document.body.innerText;
+      if (bodyText.includes("目前顯示到第 0 筆") || bodyText.includes("共 0 筆")) {
+        return [{
+          platform,
+          name: "⚠️ 無此藥品 (益全未收錄)",
+          spec: "-",
+          price: 0,
+          unit: "-",
+          stock: "缺貨",
+          link: window.location.href,
+          expiry: "-",
+          nhiCode: "-",
+          nhiPrice: 0
+        }];
+      }
+      const cards = Array.from(document.querySelectorAll(".product_info_div"));
+      if (cards.length === 0) {
+        const alternates = Array.from(document.querySelectorAll(".thumbnail"));
+        if (alternates.length > 0) return alternates.map((alt) => ({ platform, name: "結構變動(待更新)", price: 0, unit: "", stock: "", link: "" }));
+        return [];
+      }
+      return cards.map((card) => {
+        const nameEl = card.querySelector("a");
+        const name = nameEl ? nameEl.innerText.trim() : "未知藥品";
+        const link = (nameEl == null ? void 0 : nameEl.href) || window.location.href;
+        const text = card.innerText;
+        const nhiMatch = text.match(/健保碼[：:]\s*([A-Z0-9]+)/);
+        const nhiCode = nhiMatch ? nhiMatch[1] : "";
+        const expiryEl = card.querySelector(".product_valid_date");
+        const expiry = expiryEl ? expiryEl.innerText.trim() : "";
+        const priceEl = card.querySelector(".product_item_price");
+        const priceText = priceEl ? priceEl.innerText.replace(/[^0-9.]/g, "") : "0";
+        const price = parseFloat(priceText) || 0;
+        const stockEl = card.querySelector(".product_item_stock");
+        const stock = stockEl ? stockEl.innerText.trim() : "有供貨";
+        const unitMatch = name.match(/\/ (盒|袋|瓶|支|組|排)/) || text.match(/(?:包裝|\/)\s*\d*\s*(盒|袋|瓶|支|組|排)/);
+        const unit = unitMatch ? unitMatch[1] : "單位";
+        let unitPrice = void 0;
+        const sizeMatch = name.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
+        if (sizeMatch && price > 0) {
+          const size = parseInt(sizeMatch[1]);
+          if (size > 0) unitPrice = Math.round(price / size * 100) / 100;
+        }
         return {
           platform,
           name,
-          spec,
-          price: isNaN(price) ? 0 : price,
-          unit: "袋/盒",
-          // YC doesn't always show unit clearly in card, default to generic
+          spec: "",
+          price,
+          unit,
+          unitPrice,
           stock,
-          link
+          link,
+          expiry,
+          nhiCode,
+          nhiPrice: 0
         };
-      }).filter((r) => r !== null && r.name);
+      });
     }, this.platformName);
-    console.log(`[YC] Scraped ${results.length} products.`);
     return results;
   }
 }
@@ -957,49 +1122,76 @@ class TaichungConnector extends Connector {
       await page.waitForSelector(targetSelector, { timeout: 8e3 });
       console.log(`[泰昌] 執行極速貼入 -> 欄位: ${targetSelector}`);
       await this.fastType(page, targetSelector, searchTerm);
-      console.log(`[泰昌] 正在點擊搜尋按鈕...`);
-      await page.click("button.search.button");
-      console.log("[泰昌] 等待搜尋結果載入...");
+      const searchBtn = await page.$("button.search.button, button.multi.search");
+      if (searchBtn) {
+        await searchBtn.click();
+      } else {
+        await page.keyboard.press("Enter");
+      }
       await page.waitForTimeout(2e3);
     } catch (e) {
       console.warn(`[泰昌] ${fieldName} 搜尋流程發生異常:`, e);
       return [];
     }
+    const postAlert = await page.$("button.confirm.button");
+    if (postAlert) {
+      await postAlert.click();
+      await page.waitForTimeout(500);
+    }
     console.log("[Taichung] Waiting for results...");
     try {
-      await page.waitForSelector(".order_list_item, .order_row, tr:has(.drug_name)", { timeout: 8e3 });
+      await page.waitForFunction(() => {
+        const t = document.body.innerText;
+        return t.includes("健保") || t.includes("產品列表") || t.includes("搜尋結果");
+      }, { timeout: 1e4 });
+      await page.waitForTimeout(1500);
     } catch (e) {
-      console.log("[Taichung] Timeout waiting for results or no matches found.");
       return [];
     }
     const results = await page.evaluate((platform) => {
-      const items = Array.from(document.querySelectorAll(".order_list_item, .order_row, tr:has(.drug_name)"));
-      if (items.length === 0) return [];
-      return items.map((item) => {
-        var _a;
-        const nameEl = item.querySelector(".drug_name, .title, .name");
-        if (!nameEl) return null;
-        const name = nameEl.innerText.trim();
-        const link = ((_a = item.querySelector("a")) == null ? void 0 : _a.href) || window.location.href;
-        const priceEl = item.querySelector('.price, .unit_price, .red, font[color="red"]');
-        const priceText = (priceEl == null ? void 0 : priceEl.innerText.replace(/[^0-9.]/g, "")) || "0";
-        const price = parseFloat(priceText);
-        const stockEl = item.querySelector(".stock, .inventory, .status");
-        const stock = (stockEl == null ? void 0 : stockEl.innerText.trim()) || "有貨";
-        const specEl = item.querySelector(".spec, .package, .dosage");
-        const spec = (specEl == null ? void 0 : specEl.innerText.trim()) || "";
-        return {
-          platform,
-          name,
-          spec,
-          price: isNaN(price) ? 0 : price,
-          unit: "袋/盒",
-          stock,
-          link
-        };
-      }).filter((r) => r !== null && r.name);
+      try {
+        const cards = Array.from(document.querySelectorAll("li.item")).filter((el) => {
+          return el.querySelector(".nhi-code") !== null || el.querySelector("h3") !== null;
+        });
+        return cards.map((card) => {
+          const nameEl = card.querySelector("h3");
+          const name = nameEl ? nameEl.innerText.trim() : "未知藥品";
+          const nhiCodeEl = card.querySelector(".nhi-code");
+          const nhiCode = nhiCodeEl ? nhiCodeEl.innerText.trim() : "";
+          const nhiPriceEl = card.querySelector(".nhi-price");
+          const nhiPrice = nhiPriceEl ? parseFloat(nhiPriceEl.innerText.replace(/[^0-9.]/g, "")) : 0;
+          const expiryEl = card.querySelector(".lifetime");
+          const expiry = expiryEl ? expiryEl.innerText.trim() : "";
+          const priceEl = card.querySelector(".price");
+          const price = priceEl ? parseFloat(priceEl.innerText.replace(/[^0-9.]/g, "")) : 0;
+          const unitEl = card.querySelector(".unit");
+          const unit = unitEl ? unitEl.innerText.replace(/\//g, "").trim() : "單位";
+          const stockEl = card.querySelector(".stock");
+          const stockStatus = stockEl ? stockEl.innerText.trim() : "有供貨";
+          let unitPrice = void 0;
+          const sizeMatch = name.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
+          if (sizeMatch && price > 0) {
+            const size = parseInt(sizeMatch[1]);
+            if (size > 0) unitPrice = Math.round(price / size * 100) / 100;
+          }
+          return {
+            platform,
+            name,
+            spec: "",
+            price,
+            unit,
+            unitPrice,
+            stock: stockStatus,
+            link: window.location.href,
+            expiry,
+            nhiCode,
+            nhiPrice
+          };
+        });
+      } catch (e) {
+        return [];
+      }
     }, this.platformName);
-    console.log(`[Taichung] Scraped ${results.length} products.`);
     return results;
   }
 }
@@ -11854,12 +12046,17 @@ class AutomationManager {
     this.browser = null;
     this.context = null;
     this.pages = /* @__PURE__ */ new Map();
+    this.headless = false;
+  }
+  setHeadless(headless) {
+    console.log(`[Manager] Setting headless mode to: ${headless}`);
+    this.headless = headless;
   }
   async getContext() {
     if (!this.browser) {
       this.browser = await playwright.chromium.launch({
-        headless: false,
-        slowMo: 150
+        headless: this.headless,
+        slowMo: this.headless ? 0 : 150
       });
     }
     if (!this.context) {
@@ -11912,6 +12109,14 @@ function createWindow() {
   } else {
     win.loadFile(path.join(process.env.DIST, "index.html"));
   }
+  startHttpBridge();
+  if (process.env.APP_MODE) {
+    const isPython = process.env.APP_MODE.toLowerCase() === "python";
+    automationManager.setHeadless(isPython);
+    win.webContents.on("did-finish-load", () => {
+      win == null ? void 0 : win.webContents.send("init-mode", process.env.APP_MODE);
+    });
+  }
 }
 electron.app.whenReady().then(createWindow);
 electron.app.on("window-all-closed", () => {
@@ -11938,6 +12143,9 @@ electron.ipcMain.handle("save-credentials", (_event, { platformId, username, pas
   return { success: true };
 });
 electron.ipcMain.handle("perform-search", async (_event, { searchTerm, platforms }) => {
+  return await performSearch(searchTerm, platforms);
+});
+async function performSearch(searchTerm, platforms) {
   console.log(`[Main] Starting concurrent search for: ${searchTerm}`);
   isSearchInterrupted = false;
   const context = await automationManager.getContext();
@@ -11983,7 +12191,7 @@ electron.ipcMain.handle("perform-search", async (_event, { searchTerm, platforms
     });
   }
   return results;
-});
+}
 async function processNhiTxt(event, filePaths) {
   var _a;
   console.log(`[Main] Starting integrated indexing: ${filePaths.length} files`);
@@ -12162,6 +12370,10 @@ electron.ipcMain.handle("close-connections", async () => {
   await automationManager.closeAll();
   return { success: true };
 });
+electron.ipcMain.handle("set-automation-mode", async (_event, { headless }) => {
+  automationManager.setHeadless(headless);
+  return { success: true };
+});
 let drugAppearanceMap = /* @__PURE__ */ new Map();
 let drugNameAppearanceMap = /* @__PURE__ */ new Map();
 async function loadDrugAppearance() {
@@ -12192,6 +12404,9 @@ async function loadDrugAppearance() {
   }
 }
 electron.ipcMain.handle("get-drug-appearance", (_, { license, name, nhiCode }) => {
+  return getDrugAppearance(license, name, nhiCode);
+});
+function getDrugAppearance(license, name, nhiCode) {
   logToFile(`查詢藥品外觀: lic=${license}, name=${name}, nhiCode=${nhiCode}`);
   const cleanLic = (license || "").toString().trim();
   if (cleanLic && drugAppearanceMap.has(cleanLic)) {
@@ -12227,7 +12442,7 @@ electron.ipcMain.handle("get-drug-appearance", (_, { license, name, nhiCode }) =
     }
   }
   return null;
-});
+}
 electron.ipcMain.handle("ping", () => {
   logToFile("IPC Ping received");
   return "pong";
@@ -12263,11 +12478,17 @@ async function loadNhiDatabase() {
 loadNhiDatabase();
 loadDrugAppearance();
 electron.ipcMain.handle("reload-nhi-db", async () => {
+  return await reloadNhiDb();
+});
+async function reloadNhiDb() {
   logToFile("手動要求重新載入健保資料庫...");
   await loadNhiDatabase();
   return { success: true, count: nhiDatabase.length };
-});
+}
 electron.ipcMain.handle("integrate-appearance", async () => {
+  return await integrateAppearance();
+});
+async function integrateAppearance() {
   logToFile("開始執行外觀資料一鍵整合 (強化比對模式)...");
   if (nhiDatabase.length === 0) {
     await loadNhiDatabase();
@@ -12301,8 +12522,11 @@ electron.ipcMain.handle("integrate-appearance", async () => {
     logToFile("未發現可配對的新外觀資料。");
   }
   return { success: true, count: matchCount };
-});
+}
 electron.ipcMain.handle("search-nhi-local", async (_, searchTerm) => {
+  return await searchNhiLocal(searchTerm);
+});
+async function searchNhiLocal(searchTerm) {
   logToFile(`專業多條件搜尋: "${searchTerm}"`);
   if (!searchTerm || searchTerm.length < 1) return [];
   const terms = searchTerm.toLowerCase().trim().split(/\s+/).filter((t) => t.length > 0).map((t) => {
@@ -12341,4 +12565,119 @@ electron.ipcMain.handle("search-nhi-local", async (_, searchTerm) => {
   });
   logToFile(`搜尋完畢，回傳最佳匹配結果: ${sorted.length}`);
   return sorted.slice(0, 150);
-});
+}
+function startHttpBridge() {
+  const PORT = 3010;
+  const server = http.createServer(async (req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    const parsedUrl = url.parse(req.url || "", true);
+    let pathname = parsedUrl.pathname || "/";
+    if (req.method === "POST" && pathname === "/api/invoke") {
+      let body = "";
+      req.on("data", (chunk) => body += chunk.toString());
+      req.on("end", async () => {
+        try {
+          const { channel, args } = JSON.parse(body);
+          console.log(`[Bridge] Invoking ${channel} via HTTP`);
+          let result;
+          if (channel === "perform-search") {
+            result = await performSearch(args[0].searchTerm, args[0].platforms);
+          } else if (channel === "search-nhi-local") {
+            result = await searchNhiLocal(args[0]);
+          } else if (channel === "get-drug-appearance") {
+            result = await getDrugAppearance(args[0].license, args[0].name, args[0].nhiCode);
+          } else if (channel === "ping") {
+            result = "pong";
+          } else if (channel === "set-automation-mode") {
+            automationManager.setHeadless(args[0].headless);
+            result = { success: true };
+          } else if (channel === "interrupt-search") {
+            isSearchInterrupted = true;
+            await automationManager.interruptPages();
+            result = { success: true };
+          } else if (channel === "reload-nhi-db") {
+            result = await reloadNhiDb();
+          } else if (channel === "integrate-appearance") {
+            result = await integrateAppearance();
+          } else if (channel === "auto-index-nhi") {
+            const NHI_DIR = path.join(process.cwd(), "健保藥品離線資料庫");
+            if (fs.existsSync(NHI_DIR)) {
+              const allFiles = fs.readdirSync(NHI_DIR).filter((f) => /\.(txt|b5)$/i.test(f)).map((f) => path.join(NHI_DIR, f));
+              if (allFiles.length > 0) {
+                result = await processNhiTxt({ sender: { send: () => {
+                } } }, allFiles);
+              } else {
+                result = { success: false, error: "No files found" };
+              }
+            } else {
+              result = { success: false, error: "Database folder not found" };
+            }
+          } else {
+            result = { error: `Channel ${channel} not supported via bridge` };
+          }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+    if (req.method === "GET") {
+      if (pathname === "/") pathname = "/index.html";
+      const distPath = path.join(process.cwd(), "dist");
+      const filePath = path.join(distPath, pathname);
+      if (!filePath.startsWith(distPath)) {
+        res.writeHead(403);
+        res.end("Forbidden");
+        return;
+      }
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        const ext = path.extname(filePath).toLowerCase();
+        const mimeTypes = {
+          ".html": "text/html",
+          ".js": "text/javascript",
+          ".css": "text/css",
+          ".json": "application/json",
+          ".png": "image/png",
+          ".jpg": "image/jpg",
+          ".gif": "image/gif",
+          ".svg": "image/svg+xml",
+          ".wav": "audio/wav",
+          ".mp4": "video/mp4",
+          ".woff": "application/font-woff",
+          ".ttf": "application/font-ttf",
+          ".eot": "application/vnd.ms-fontobject",
+          ".otf": "application/font-otf",
+          ".wasm": "application/wasm"
+        };
+        const contentType = mimeTypes[ext] || "application/octet-stream";
+        res.writeHead(200, { "Content-Type": contentType });
+        fs.createReadStream(filePath).pipe(res);
+      } else {
+        const indexPath = path.join(distPath, "index.html");
+        if (fs.existsSync(indexPath)) {
+          res.writeHead(200, { "Content-Type": "text/html" });
+          fs.createReadStream(indexPath).pipe(res);
+        } else {
+          res.writeHead(404);
+          res.end("Not Found");
+        }
+      }
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`[Bridge] HTTP Bridge Server running at http://0.0.0.0:${PORT}`);
+  });
+}

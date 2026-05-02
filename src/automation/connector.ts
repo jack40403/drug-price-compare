@@ -8,6 +8,11 @@ export interface ProductResult {
   unit: string;
   stock: string;
   link: string;
+  expiry?: string;
+  memo?: string;
+  nhiCode?: string;
+  nhiPrice?: number;
+  unitPrice?: number;
 }
 
 export abstract class Connector {

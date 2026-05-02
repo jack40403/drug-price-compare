@@ -75,50 +75,85 @@ export class YuShengConnector extends Connector {
     console.log(`[宇盛] 正準備發動搜尋: "${searchTerm}"`)
     
     try {
-      // 宇盛搜尋需要確保在產品頁或從首頁輸入
       await page.goto('https://www.yusheng0307.com/product.html', { waitUntil: 'networkidle' })
-      // 使用極速貼上搜尋關鍵字
       console.log('[宇盛] 執行極速貼入搜尋...')
       await this.fastType(page, 'input[name="keyword"]', searchTerm)
       await page.keyboard.press('Enter')
       
-      // 等待結果渲染
-      await page.waitForSelector('div.row.border.rounded', { timeout: 10000 })
+      await page.waitForSelector('a.text-info, .text-outofstock', { timeout: 8000 })
+      await page.waitForTimeout(1500)
     } catch (e) {
-      console.log('[宇盛] 搜尋無結果:', e)
+      console.log('[宇盛] 搜尋逾時或無結果')
       return []
     }
 
-    const results: ProductResult[] = []
-    
-    const cards = await page.$$('div.row.border.rounded.mb-3')
-    for (const card of cards) {
+    const results: ProductResult[] = await page.evaluate((platform) => {
       try {
-        const name = (await card.$eval('p.fw-bolder.mb-0', el => el.textContent))?.trim() || ''
-        const nhiCode = (await card.$eval('a.hvr-grow', el => el.textContent))?.trim() || ''
-        
-        // 價格與單位通常在一個 span 內，格式如 "750 / 盒"
-        const priceText = (await card.$eval('span.fw-bolder.fs-5.text-primary', el => el.textContent))?.trim() || ''
-        const priceMatch = priceText.match(/(\d+)\s*\/\s*(.+)/)
-        const priceValue = priceMatch ? parseInt(priceMatch[1]) : 0
-        const unitValue = priceMatch ? priceMatch[2].trim() : ''
+        // 1. 鎖定真正的產品大行 (d-lg-block 且包含健保碼)
+        const rows = Array.from(document.querySelectorAll('li.d-lg-block')).filter(row => {
+          return row.querySelector('a.text-info') !== null && !row.innerText.includes('產品圖');
+        });
 
-        // 偵測庫存狀態
-        const isOutOfStock = (await card.$('.text-outofstock')) !== null
-        const stockStatus = isOutOfStock ? '缺貨中' : '供貨中'
+        if (rows.length === 0) return [];
 
-        results.push({
-          platform: '宇盛',
-          name: name,
-          spec: nhiCode ? `[${nhiCode}]` : '',
-          price: priceValue,
-          unit: unitValue,
-          stock: stockStatus
-        })
+        return rows.map((row) => {
+          const rowText = (row as HTMLElement).innerText;
+
+          // 品名 (.fw-bolder)
+          const nameEl = row.querySelector('.fw-bolder');
+          const name = nameEl ? nameEl.innerText.trim() : '未知藥品';
+
+          // 健保碼 (a.text-info)
+          const nhiEl = row.querySelector('a.text-info');
+          const nhiCode = nhiEl ? nhiEl.innerText.trim() : '';
+
+          // 健保價 (改用正則尋找文字 "健保價： 14.80")
+          const nhiPriceMatch = rowText.match(/健保價\s*[:：]\s*([\d,.]+)/);
+          const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, '')) : 0;
+
+          // 售價 (span.fs-5)
+          const priceEl = row.querySelector('span.fs-5');
+          const price = priceEl ? parseFloat(priceEl.innerText.replace(/[^0-9.]/g, '')) : 0;
+
+          // 單位
+          const priceAreaText = priceEl?.parentElement?.innerText || '';
+          const unitMatch = priceAreaText.match(/\/\s*([^\n\s：:]+)/);
+          const unit = unitMatch ? unitMatch[1].trim() : '單位';
+
+          // 庫存
+          const isOutOfStock = row.querySelector('.text-outofstock') !== null;
+          const stock = isOutOfStock ? '缺貨中' : '有供貨';
+
+          // 有效期限
+          const expiryMatch = rowText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+          const expiry = expiryMatch ? expiryMatch[1] : '';
+
+          // 單價換算
+          let unitPrice: number | undefined = undefined;
+          const sizeMatch = name.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
+          if (sizeMatch && price > 0) {
+            const size = parseInt(sizeMatch[1]);
+            if (size > 0) unitPrice = Math.round((price / size) * 100) / 100;
+          }
+
+          return {
+            platform,
+            name,
+            spec: '',
+            price,
+            unit,
+            unitPrice,
+            stock,
+            link: window.location.href,
+            expiry,
+            nhiCode,
+            nhiPrice
+          };
+        });
       } catch (e) {
-        continue
+        return [];
       }
-    }
+    }, this.platformName)
 
     return results
   }
