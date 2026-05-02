@@ -28,20 +28,44 @@ export class MDTConnector extends Connector {
     await this.humanType(page, 'input#Account', creds.username)
     await this.humanType(page, 'input#PWD', creds.password)
     
-    // [優化] 等待使用者手動輸入驗證碼並登入
-    // 監控網址變化，直到離開登入頁面且進入商城或產品區域
+    // [新實作] 遠端驗證碼輸入機制
+    if (this.captchaHandler) {
+      try {
+        console.log('[蔓達特] 偵測驗證碼圖片...')
+        const captchaImg = page.locator('#validimg, img#ImgCaptcha, img[src*="Captcha"]').first()
+        await captchaImg.waitFor({ state: 'visible', timeout: 5000 })
+        
+        const screenshot = await captchaImg.screenshot({ type: 'png' })
+        const base64Image = `data:image/png;base64,${screenshot.toString('base64')}`
+        
+        console.log('[蔓達特] 已截取驗證碼，正在請求使用者輸入...')
+        const code = await this.captchaHandler(this.platformId, this.platformName, base64Image)
+        
+        console.log(`[蔓達特] 收到輸入: ${code}，正在自動填入並登入...`)
+        await page.waitForTimeout(500)
+        const inputSelector = '#captchaTextBox, input#Code, input[name="Code"]'
+        await page.fill(inputSelector, code)
+        await this.humanType(page, inputSelector, code)
+        await page.keyboard.press('Enter')
+        // 保留 click 作為備援
+        await page.click('input[type="submit"], input[value="登入"], #btnsend').catch(() => {})
+      } catch (e) {
+        console.log('[蔓達特] 無法自動定位驗證碼，切換回手動等待模式...')
+      }
+    }
+
+    // [備援] 監控網址變化，直到離開登入頁面
     try {
-      console.log('[蔓達特] 等待手動登入成功...')
+      console.log('[蔓達特] 等待登入狀態確認...')
       await page.waitForFunction(() => {
         const url = window.location.href
         return url.includes('mdtky.com.tw/Shop/') || url.includes('Product/Search') || (url === 'https://www.mdtky.com.tw/')
-      }, { timeout: 300000 }) // 統一等待 5 分鐘處理驗證碼
+      }, { timeout: 120000 }) 
       
       console.log('[蔓達特] 偵測到登入成功，正在跳轉至產品搜尋頁面...')
-      // 成功後強制跳轉至使用者要求的網址
       await page.goto('https://www.mdtky.com.tw/Shop/Product/', { waitUntil: 'domcontentloaded' })
     } catch (e) {
-      console.warn('[蔓達特] 等待登入超時或發生錯誤，請檢查瀏覽器狀態。')
+      console.warn('[蔓達特] 登入超時，請檢查驗證碼是否正確。')
     }
 
     return true

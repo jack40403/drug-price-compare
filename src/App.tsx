@@ -4,51 +4,21 @@ import Settings from './components/Settings'
 import ModeSelector from './components/ModeSelector'
 import { LayoutDashboard, Settings as SettingsIcon, Pill, Globe, Search, RefreshCw } from 'lucide-react'
 
-// --- Browser Fallback for Electron API ---
-if (typeof window !== 'undefined' && !(window as any).electronAPI) {
-  (window as any).electronAPI = {
-    invoke: async (channel: string, ...args: any[]) => {
-      try {
-        const host = window.location.hostname || 'localhost';
-        const url = `http://${host}:3010/api/invoke`;
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ channel, args })
-        });
-        return await response.json();
-      } catch (err) {
-        console.error('[Browser Fallback] Failed to invoke:', channel, err);
-        throw err;
-      }
-    },
-    performSearch: async (searchTerm: string, platforms: string[]) => {
-      const host = window.location.hostname || 'localhost';
-      const url = `http://${host}:3010/api/invoke`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel: 'perform-search', args: [{ searchTerm, platforms }] })
-      });
-      return await response.json();
-    },
-    onUpdateProgress: (callback: any) => {
-      console.warn('[Browser Fallback] onUpdateProgress not supported in browser yet');
-      return () => {};
-    },
-    onInitMode: (callback: any) => {
-      console.warn('[Browser Fallback] onInitMode not supported in browser yet');
-      return () => {};
-    }
-  };
-}
+// Duplicate browser fallback removed, now handled in main.tsx
 
 function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'settings'>('dashboard')
   const [mode, setMode] = useState<'chrome' | 'python' | null>(null)
 
   useEffect(() => {
-    // 檢查是否有從後端傳入的初始模式
+    // 1. 如果是網頁版 (透過墊片識別)，自動進入後台模式
+    if (window.navigator.userAgent.includes('Electron') === false) {
+      console.log('[App] 偵測為網頁環境，自動啟動後台模式...');
+      setMode('python');
+      return;
+    }
+
+    // 2. 如果是 Electron，檢查是否有從後端傳入的初始模式
     if ((window as any).electronAPI) {
       const removeListener = (window as any).electronAPI.onInitMode((initMode: string) => {
         handleModeSelect(initMode as 'chrome' | 'python')
@@ -86,8 +56,10 @@ function App() {
     return <ModeSelector onSelect={handleModeSelect} />
   }
 
+  const isElectron = window.navigator.userAgent.includes('Electron');
+
   return (
-    <div className="flex flex-col h-screen bg-slate-50 overflow-hidden">
+    <div className={`flex flex-col ${isElectron ? 'h-screen overflow-hidden' : 'min-h-screen'} bg-slate-50`}>
       {/* 🔝 Top Header Navigation */}
       <header className="bg-white border-b border-slate-200 shadow-sm z-50">
         <div className="max-w-[1400px] mx-auto px-6 h-20 flex items-center justify-between">

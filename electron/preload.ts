@@ -14,5 +14,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('init-mode', subscription)
     return () => ipcRenderer.removeListener('init-mode', subscription)
   },
+  onRequestCaptcha: (callback: (data: any) => void) => {
+    const subscription = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('request-captcha', subscription)
+    return () => ipcRenderer.removeListener('request-captcha', subscription)
+  },
   invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
+  on: (channel: string, callback: (...args: any[]) => void) => {
+    const subscription = (_event: any, ...args: any[]) => callback(...args)
+    ipcRenderer.on(channel, subscription)
+    return () => ipcRenderer.removeListener(channel, subscription)
+  },
 })

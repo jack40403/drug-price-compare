@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Search, Loader2, ArrowUpDown, CheckCircle2, TrendingDown, Pill, RefreshCcw, Copy, Check, Zap, Banknote, Globe, Activity, Settings, Image as ImageIcon } from 'lucide-react'
+import { Search, Loader2, ArrowUpDown, CheckCircle2, TrendingDown, Pill, RefreshCcw, Copy, Check, Zap, Banknote, Globe, Activity, Settings, Image as ImageIcon, Send, ShieldAlert } from 'lucide-react'
 import DrugAppearanceModal from './DrugAppearanceModal'
 
 interface Product {
@@ -34,6 +34,9 @@ const Dashboard = () => {
   const [indexingStatus, setIndexingStatus] = useState<any>(null) // 獨立的建索引狀態
   const [isStrictFilter, setIsStrictFilter] = useState(true) // 精確過濾開關 (預設開啟)
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' | null }>({ key: '', direction: null }) // 排序設定
+  const [captchaQueue, setCaptchaQueue] = useState<any[]>([])
+  const [captchaInputs, setCaptchaInputs] = useState<Record<string, string>>({})
+  const [bridgeConnected, setBridgeConnected] = useState(true) // 預設為 true，網頁版會更新
 
   const platformColorMap: Record<string, string> = {
     'binli': 'bg-blue-100 text-blue-800 border-blue-200',
@@ -66,8 +69,38 @@ const Dashboard = () => {
   const selectAllPlatforms = () => setSelectedPlatforms(PLATFORMS.map(p => p.id))
   const selectNonePlatforms = () => setSelectedPlatforms([])
 
-  // 診斷偵測：啟動時檢查後端通訊是否正常
+  // 診斷偵測：啟動時檢查後端狀態與環境
   useEffect(() => {
+    // [手機端 API 偽裝] 如果沒偵測到 Electron，就自己創一個，讓所有按鈕都能走 HTTP 橋接
+    if (!(window as any).electronAPI) {
+      console.log('[Dashboard] 手機/網頁環境：正在注入 API 偽裝層...');
+      const bridgeHost = window.location.hostname || 'localhost';
+      const bridgeBase = `http://${bridgeHost}:3010/api`;
+
+      (window as any).electronAPI = {
+        invoke: async (channel: string, ...args: any[]) => {
+          const res = await fetch(`${bridgeBase}/invoke`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel, args })
+          });
+          return await res.json();
+        },
+        on: (channel: string, callback: any) => {
+          // 手機端監聽器，目前暫不實作
+          return () => {};
+        },
+        getCredentials: (id: string) => (window as any).electronAPI.invoke('get-credentials', id),
+        saveCredentials: (creds: any) => (window as any).electronAPI.invoke('save-credentials', creds),
+        performSearch: (searchTerm: string, platforms: string[]) => 
+          (window as any).electronAPI.invoke('perform-search', { searchTerm, platforms }),
+        interruptSearch: () => (window as any).electronAPI.invoke('interrupt-search'),
+        getDrugAppearance: (args: any) => (window as any).electronAPI.invoke('get-drug-appearance', args),
+        onRequestCaptcha: () => (() => {}),
+        onUpdateProgress: () => (() => {}),
+      };
+    }
+
     const checkConnection = async () => {
       try {
         const res = await (window as any).electronAPI.invoke('ping')
@@ -83,8 +116,53 @@ const Dashboard = () => {
       setMaintenanceStatus(data)
     })
 
+    // Listen for CAPTCHA requests
+    let removeCaptchaListener: any;
+    let pollInterval: any;
+
+    if (navigator.userAgent.toLowerCase().includes('electron')) {
+      // 電腦端監聽
+      removeCaptchaListener = (window as any).electronAPI.onRequestCaptcha((data: any) => {
+        console.log('[Dashboard] 收到驗證碼請求 (IPC):', data.platformName)
+        setCaptchaQueue(prev => {
+          const filtered = prev.filter(q => q.platformId !== data.platformId);
+          return [...filtered, data];
+        });
+      })
+
+      // 監聽清空請求 (防黑屏檢查)
+      if (typeof (window as any).electronAPI.on === 'function') {
+        (window as any).electronAPI.on('clear-captchas', () => {
+          setCaptchaQueue([]);
+          setCaptchaInputs({});
+        });
+      }
+    } else {
+      // 手機端/網頁版：啟動輪詢
+      const bridgeHost = window.location.hostname || 'localhost';
+      pollInterval = setInterval(async () => {
+        try {
+          const bridgeUrl = `http://${bridgeHost}:3010/api/captchas?t=${Date.now()}`;
+          const res = await fetch(bridgeUrl)
+          if (res.ok) {
+            const data = await res.json()
+            if (Array.isArray(data)) {
+              setCaptchaQueue(data)
+              setBridgeConnected(true)
+            }
+          } else {
+            setBridgeConnected(false)
+          }
+        } catch (e) {
+          setBridgeConnected(false)
+        }
+      }, 2000)
+    }
+
     return () => {
       if (typeof removeListener === 'function') removeListener()
+      if (typeof removeCaptchaListener === 'function') removeCaptchaListener()
+      if (pollInterval) clearInterval(pollInterval)
     }
   }, [])
 
@@ -100,6 +178,27 @@ const Dashboard = () => {
     navigator.clipboard.writeText(code)
     setCopiedCode(code)
     setTimeout(() => setCopiedCode(null), 2000)
+  }
+
+  const handleCaptchaSubmit = async (platformId: string) => {
+    const code = captchaInputs[platformId]
+    if (!code) return
+
+    try {
+      await (window as any).electronAPI.invoke('submit-captcha', {
+        platformId,
+        code
+      })
+      // 移除本地顯示
+      setCaptchaQueue(prev => prev.filter(q => q.platformId !== platformId))
+      setCaptchaInputs(prev => {
+        const next = { ...prev }
+        delete next[platformId]
+        return next
+      })
+    } catch (err) {
+      console.error('提交驗證碼失敗:', err)
+    }
   }
 
   const handleCopyBrand = (brand: string, idx: number) => {
@@ -338,6 +437,12 @@ const Dashboard = () => {
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${isSearching ? 'bg-amber-400 animate-pulse' : 'bg-slate-700'}`} />
             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{isSearching ? 'Syncing...' : 'System Ready'}</span>
+            
+            {/* 橋接狀態燈 - 強制顯示以便診斷 */}
+            <div className="flex items-center gap-2 ml-2 px-2 py-0.5 bg-slate-800 rounded-md border border-white/5">
+              <div className={`w-1.5 h-1.5 rounded-full ${bridgeConnected ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-rose-500 animate-pulse'}`} />
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">Bridge: {bridgeConnected ? 'Live' : 'Offline'}</span>
+            </div>
           </div>
           <div className="h-4 w-px bg-white/10 mx-2" />
           <button className="text-slate-500 hover:text-amber-400 transition-colors">
@@ -881,6 +986,72 @@ const Dashboard = () => {
         </div>
       )}
       </main>
+
+      {/* 驗證碼交互中心 (並列磁貼式) */}
+      {captchaQueue.length > 0 && (
+        <div className="fixed bottom-6 left-6 right-6 z-[100] flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
+          {captchaQueue.map((req) => (
+            <div 
+              key={req.platformId}
+              className="flex-shrink-0 w-80 bg-slate-900 border-2 border-amber-500/50 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-xl animate-in slide-in-from-bottom-10"
+            >
+              <div className="bg-amber-500 px-4 py-2 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert size={16} className="text-slate-900" />
+                  <span className="font-black text-slate-900 text-xs uppercase tracking-tighter">
+                    {req.platformName} 驗證碼
+                  </span>
+                </div>
+                <div className="w-2 h-2 rounded-full bg-slate-900 animate-pulse" />
+              </div>
+              
+              <div className="p-4 space-y-4">
+                <div className="bg-white rounded-xl p-3 flex justify-center shadow-inner min-h-[60px]">
+                  {req.image ? (
+                    <img 
+                      src={req.image} 
+                      alt="captcha" 
+                      className="h-12 object-contain"
+                    />
+                  ) : (
+                    <div className="flex items-center gap-2 text-slate-400">
+                      <Loader2 size={16} className="animate-spin" />
+                      <span className="text-[10px] font-bold">載入中...</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="relative group">
+                  <input
+                    type="text"
+                    value={captchaInputs[req.platformId] || ''}
+                    onChange={(e) => setCaptchaInputs(prev => ({
+                      ...prev,
+                      [req.platformId]: e.target.value
+                    }))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleCaptchaSubmit(req.platformId)
+                    }}
+                    placeholder="請輸入驗證碼"
+                    autoFocus
+                    className="w-full bg-slate-800 border-2 border-white/5 rounded-xl px-4 py-3 text-white font-black placeholder:text-slate-600 focus:border-amber-500/50 transition-all outline-none"
+                  />
+                  <button 
+                    onClick={() => handleCaptchaSubmit(req.platformId)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-lg transition-colors shadow-lg"
+                  >
+                    <Send size={18} />
+                  </button>
+                </div>
+                
+                <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest text-center">
+                  Remote Verification Center • Active
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       
       {/* 🚀 頁腳 */}
       <footer className="mt-20 border-t border-white/5 p-10 text-center bg-transparent">

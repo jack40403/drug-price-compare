@@ -171,6 +171,7 @@ class AutomationManager {
 
 const automationManager = new AutomationManager()
 let isSearchInterrupted = false
+let pendingCaptchas: any[] = []
 
 function createWindow() {
   win = new BrowserWindow({
@@ -233,24 +234,57 @@ ipcMain.handle('save-credentials', (_event, { platformId, username, password }) 
 
 ipcMain.handle('perform-search', async (_event, { searchTerm, platforms }) => {
   return await performSearch(searchTerm, platforms);
-})
+});
+
+// 定義統一的驗證碼處理函式
+const handleRequestCaptcha = async (platformId: string, platformName: string, image: string): Promise<string> => {
+  return new Promise((resolve) => {
+    console.log(`[Main] 收到驗證碼請求: ${platformName}`);
+    
+    // 存入全域隊列 (供手機端輪詢)
+    pendingCaptchas.push({
+      platformId,
+      platformName,
+      image,
+      resolve
+    });
+
+    // 通知電腦前端 (IPC)
+    win?.webContents.send('request-captcha', { platformId, platformName, image });
+  });
+};
+
+ipcMain.handle('submit-captcha', async (_event, { platformId, code }) => {
+  console.log(`[Main] 收到驗證碼提交: ${platformId} = ${code}`);
+  const req = pendingCaptchas.find(r => r.platformId === platformId);
+  if (req && req.resolve) {
+    req.resolve(code);
+    pendingCaptchas = pendingCaptchas.filter(r => r.platformId !== platformId);
+    return { success: true };
+  }
+  return { success: false, error: 'Request not found or expired' };
+});
 
 async function performSearch(searchTerm: string, platforms: string[]) {
   console.log(`[Main] Starting concurrent search for: ${searchTerm}`)
+  
+  // 啟動搜尋時清空所有舊的驗證碼狀態
+  pendingCaptchas = [];
+  win?.webContents.send('clear-captchas');
   isSearchInterrupted = false
   
   const context = await automationManager.getContext()
   
   const connectors: Connector[] = [
-    new BinLiConnector(context),
-    new ChahwaConnector(context),
-    new JhaoHongConnector(context),
-    new YesChainConnector(context),
-    new YuShengConnector(context),
-    new CodaConnector(context),
-    new MDTConnector(context),
-    new YCConnector(context),
-    new TaichungConnector(context),
+    new BinLiConnector(context, handleRequestCaptcha),
+    new ChahwaConnector(context, handleRequestCaptcha),
+    new JhaoHongConnector(context, handleRequestCaptcha),
+    new YesChainConnector(context, handleRequestCaptcha),
+    new YuShengConnector(context, handleRequestCaptcha),
+    new CodaConnector(context, handleRequestCaptcha),
+    new MDTConnector(context, handleRequestCaptcha),
+    new YCConnector(context, handleRequestCaptcha),
+    new TaichungConnector(context, handleRequestCaptcha),
   ].filter(c => platforms.includes(c.platformId))
 
   const searchTasks = connectors.map(async (connector) => {
@@ -807,6 +841,16 @@ function startHttpBridge() {
           let result;
           if (channel === 'perform-search') {
             result = await performSearch(args[0].searchTerm, args[0].platforms);
+          } else if (channel === 'submit-captcha') {
+            const { platformId, code } = args[0];
+            const captchaReq = pendingCaptchas.find(r => r.platformId === platformId);
+            if (captchaReq && captchaReq.resolve) {
+              captchaReq.resolve(code);
+              pendingCaptchas = pendingCaptchas.filter(r => r.platformId !== platformId);
+              result = { success: true };
+            } else {
+              result = { success: false, error: 'Captcha request not found' };
+            }
           } else if (channel === 'search-nhi-local') {
             result = await searchNhiLocal(args[0]);
           } else if (channel === 'get-drug-appearance') {
@@ -850,6 +894,18 @@ function startHttpBridge() {
           res.end(JSON.stringify({ error: err.message }));
         }
       });
+      return;
+    }
+
+    if (req.method === 'GET' && pathname === '/api/captchas') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      // 只回傳需要的資料，過濾掉 resolve 等 function
+      const data = pendingCaptchas.map(r => ({
+        platformId: r.platformId,
+        platformName: r.platformName,
+        image: r.image
+      }));
+      res.end(JSON.stringify(data));
       return;
     }
 

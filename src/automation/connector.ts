@@ -21,8 +21,11 @@ export abstract class Connector {
   abstract baseUrl: string;
 
   protected context: BrowserContext;
-  constructor(context: BrowserContext) {
+  public captchaHandler?: (platformId: string, platformName: string, image: string) => Promise<string>;
+
+  constructor(context: BrowserContext, captchaHandler?: (platformId: string, platformName: string, image: string) => Promise<string>) {
     this.context = context;
+    this.captchaHandler = captchaHandler;
   }
 
   /**

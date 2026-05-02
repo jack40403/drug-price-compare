@@ -8,8 +8,8 @@ export class YesChainConnector extends Connector {
   baseUrl = 'https://www.yeschain.com.tw/b2bStoreCart/home'
 
   protected context: BrowserContext
-  constructor(context: BrowserContext) {
-    super(context)
+  constructor(context: BrowserContext, captchaHandler?: (platformId: string, platformName: string, image: string) => Promise<string>) {
+    super(context, captchaHandler)
     this.context = context
   }
 
@@ -54,7 +54,39 @@ export class YesChainConnector extends Connector {
       // 偵測是否有驗證碼
       const rcode = page.locator('input#rcode').filter({ visible: true }).first()
       if (await rcode.isVisible()) {
-        console.log('[好鄰居] 偵測到驗證碼，請手動輸入並點擊登入...')
+        console.log('[好鄰居] 偵測到驗證碼，正在截圖並請求遠端輸入...')
+        
+        if (this.captchaHandler) {
+          try {
+            // [終極優化] 抓取包含 getRandom 關鍵字的所有圖片
+            let captchaImg = page.locator("img[src*='getRandom'], img[src*='Code'], img[src*='rcode']").first()
+            
+            if (!(await captchaImg.isVisible())) {
+              captchaImg = page.locator('input#rcode + div img, input#rcode ~ img, .formBox img').first()
+            }
+
+            console.log('[好鄰居] 正在等待驗證碼圖片載入...')
+            await captchaImg.waitFor({ state: 'visible', timeout: 10000 })
+            
+            await page.waitForTimeout(500)
+            const screenshot = await captchaImg.screenshot({ type: 'png' })
+            const base64Image = `data:image/png;base64,${screenshot.toString('base64')}`
+            
+            const code = await this.captchaHandler(this.platformId, this.platformName, base64Image)
+            console.log(`[好鄰居] 收到驗證碼: ${code}，正在自動填入...`)
+            
+            await page.fill('input#rcode', code)
+            await this.humanType(page, 'input#rcode >> visible=true', code)
+            await page.waitForTimeout(500) // 等待穩定
+            
+            const submitBtn = page.locator('button[type="submit"]:has-text("登入"), button:has-text("登入")').filter({ visible: true }).first()
+            await submitBtn.click()
+            await page.waitForTimeout(2000)
+          } catch (e) {
+            console.log('[好鄰居] 遠端驗證碼流程失敗，切換回手動監控模式...')
+          }
+        }
+
         // 核心修正 3：輪詢感應 Token (300秒)
         for (let i = 0; i < 300; i++) {
           if (await this.isLoggedIn(page)) {
