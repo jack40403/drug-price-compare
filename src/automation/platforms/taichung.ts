@@ -40,9 +40,10 @@ export class TaichungConnector extends Connector {
     return success
   }
 
-  async search(page: Page, searchTerm: string): Promise<ProductResult[]> {
-    console.log(`[泰昌] 正準備搜尋: "${searchTerm}"`)
-    const isCode = this.isNHICode(searchTerm)
+  async search(page: Page, searchTerm: string, filters?: any): Promise<ProductResult[]> {
+    console.log(`[泰昌] 正準備搜尋: "${searchTerm}", Filters: ${JSON.stringify(filters)}`)
+    // 根據手動勾選決定欄位
+    const isCode = filters?.code === true;
     const targetUrl = 'https://taichung-pc.com.tw/order.php?act=order'
     const targetSelector = isCode ? 'input[name="hid"]' : 'input[name="drug"]'
     const fieldName = isCode ? '健保碼' : '品名'

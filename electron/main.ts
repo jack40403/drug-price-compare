@@ -232,8 +232,8 @@ ipcMain.handle('save-credentials', (_event, { platformId, username, password }) 
   return { success: true }
 })
 
-ipcMain.handle('perform-search', async (_event, { searchTerm, platforms }) => {
-  return await performSearch(searchTerm, platforms);
+ipcMain.handle('perform-search', async (_event, { searchTerm, platforms, filters }) => {
+  return await performSearch(searchTerm, platforms, filters);
 });
 
 // 定義統一的驗證碼處理函式
@@ -265,8 +265,8 @@ ipcMain.handle('submit-captcha', async (_event, { platformId, code }) => {
   return { success: false, error: 'Request not found or expired' };
 });
 
-async function performSearch(searchTerm: string, platforms: string[]) {
-  console.log(`[Main] Starting concurrent search for: ${searchTerm}`)
+async function performSearch(searchTerm: string, platforms: string[], filters?: any) {
+  console.log(`[Main] Starting concurrent search for: "${searchTerm}", Filters: ${JSON.stringify(filters)}`)
   
   // 啟動搜尋時清空所有舊的驗證碼狀態
   pendingCaptchas = [];
@@ -299,10 +299,13 @@ async function performSearch(searchTerm: string, platforms: string[]) {
       
       const success = await connector.ensureLoggedIn(page, { ...creds, password: decryptedPassword })
       
+      // 關鍵修正：登入程序結束後（不論成功失敗），通知前端關閉該平台的驗證碼視窗
+      win?.webContents.send('clear-captcha-for-platform', connector.platformId);
+      
       if (isSearchInterrupted) return []
       
       if (success) {
-        return await connector.search(page, searchTerm)
+        return await connector.search(page, searchTerm, filters)
       }
       return []
     } catch (e) {
@@ -750,12 +753,12 @@ async function integrateAppearance() {
   return { success: true, count: matchCount };
 }
 
-ipcMain.handle('search-nhi-local', async (_, searchTerm: string) => {
-  return await searchNhiLocal(searchTerm);
+ipcMain.handle('search-nhi-local', async (_, { searchTerm, filters }) => {
+  return await searchNhiLocal(searchTerm, filters);
 })
 
-async function searchNhiLocal(searchTerm: string) {
-  logToFile(`專業多條件搜尋: "${searchTerm}"`);
+async function searchNhiLocal(searchTerm: string, filters?: { name?: boolean, code?: boolean, component?: boolean }) {
+  logToFile(`專業多條件搜尋: "${searchTerm}", 過濾器: ${JSON.stringify(filters)}`);
   if (!searchTerm || searchTerm.length < 1) return [];
   
   // 支援多關鍵字搜尋 (以空格分開)
@@ -772,12 +775,23 @@ async function searchNhiLocal(searchTerm: string) {
     return [];
   }
 
+  // 判斷是否有啟用任何過濾器，若無則預設搜尋全部
+  const isAnyFilterEnabled = filters && (filters.name || filters.code || filters.component);
+
   // 1. 廣泛過濾
   let filtered = nhiDatabase.filter((item: any) => {
     // 必須符合「所有」輸入的關鍵字
     return terms.every(term => {
-      const targetStr = `${item.c} ${item.br} ${item.br_en} ${item.ing} ${item.m} ${item.n} ${item.n_cn}`.toLowerCase();
-      return targetStr.includes(term);
+      if (!isAnyFilterEnabled) {
+        const targetStr = `${item.c} ${item.br} ${item.br_en} ${item.ing} ${item.m} ${item.n} ${item.n_cn}`.toLowerCase();
+        return targetStr.includes(term);
+      } else {
+        let match = false;
+        if (filters.code && item.c.toLowerCase().includes(term)) match = true;
+        if (filters.name && `${item.br} ${item.br_en} ${item.n} ${item.n_cn}`.toLowerCase().includes(term)) match = true;
+        if (filters.component && item.ing && item.ing.toLowerCase().includes(term)) match = true;
+        return match;
+      }
     });
   });
 
@@ -785,8 +799,16 @@ async function searchNhiLocal(searchTerm: string) {
   if (filtered.length === 0) {
     filtered = nhiDatabase.filter((item: any) => {
       return terms.some(term => {
-        const targetStr = `${item.c} ${item.br} ${item.br_en} ${item.ing} ${item.m} ${item.n} ${item.n_cn}`.toLowerCase();
-        return targetStr.includes(term);
+        if (!isAnyFilterEnabled) {
+          const targetStr = `${item.c} ${item.br} ${item.br_en} ${item.ing} ${item.m} ${item.n} ${item.n_cn}`.toLowerCase();
+          return targetStr.includes(term);
+        } else {
+          let match = false;
+          if (filters.code && item.c.toLowerCase().includes(term)) match = true;
+          if (filters.name && `${item.br} ${item.br_en} ${item.n} ${item.n_cn}`.toLowerCase().includes(term)) match = true;
+          if (filters.component && item.ing && item.ing.toLowerCase().includes(term)) match = true;
+          return match;
+        }
       });
     }).slice(0, 50); // 避免 OR 搜尋結果過多導致前端卡死
   }

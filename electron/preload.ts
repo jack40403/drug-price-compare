@@ -3,7 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('electronAPI', {
   getCredentials: (platformId: string) => ipcRenderer.invoke('get-credentials', platformId),
   saveCredentials: (creds: any) => ipcRenderer.invoke('save-credentials', creds),
-  performSearch: (searchTerm: string, platforms: string[]) => ipcRenderer.invoke('perform-search', { searchTerm, platforms }),
+  performSearch: (searchTerm: string, platforms: string[], filters?: any) => ipcRenderer.invoke('perform-search', { searchTerm, platforms, filters }),
   onUpdateProgress: (callback: (value: any) => void) => {
     const subscription = (_event: any, value: any) => callback(value)
     ipcRenderer.on('update-progress', subscription)

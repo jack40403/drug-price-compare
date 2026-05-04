@@ -1,0 +1,7 @@
+健保藥品離線資料庫/
+藥品外觀/
+src/assets/nhi_index.json
+node_modules/
+dist/
+dist-electron/
+*.log

@@ -3,7 +3,7 @@ const electron = require("electron");
 electron.contextBridge.exposeInMainWorld("electronAPI", {
   getCredentials: (platformId) => electron.ipcRenderer.invoke("get-credentials", platformId),
   saveCredentials: (creds) => electron.ipcRenderer.invoke("save-credentials", creds),
-  performSearch: (searchTerm, platforms) => electron.ipcRenderer.invoke("perform-search", { searchTerm, platforms }),
+  performSearch: (searchTerm, platforms, filters) => electron.ipcRenderer.invoke("perform-search", { searchTerm, platforms, filters }),
   onUpdateProgress: (callback) => {
     const subscription = (_event, value) => callback(value);
     electron.ipcRenderer.on("update-progress", subscription);

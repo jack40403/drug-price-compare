@@ -44,15 +44,16 @@ export class YCConnector extends Connector {
     return success
   }
 
-  async search(page: Page, searchTerm: string): Promise<ProductResult[]> {
-    console.log(`[YC] Searching for: "${searchTerm}"`)
+  async search(page: Page, searchTerm: string, filters?: any): Promise<ProductResult[]> {
+    console.log(`[YC] Searching for: "${searchTerm}", Filters: ${JSON.stringify(filters)}`)
 
     if (!page.url().includes('/product/all/index.html')) {
       await page.goto(`${this.baseUrl}/product/all/index.html`, { waitUntil: 'domcontentloaded' })
     }
 
     try {
-      const isCode = this.isNHICode(searchTerm)
+      // 根據手動勾選決定欄位
+      const isCode = filters?.code === true;
       const targetSelector = isCode ? 'input[name="code"]' : 'input[name="product_name"]'
       
       await page.waitForSelector(targetSelector, { timeout: 5000 })

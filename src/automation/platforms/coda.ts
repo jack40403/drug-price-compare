@@ -50,8 +50,8 @@ export class CodaConnector extends Connector {
     return await this.isLoggedIn(page)
   }
 
-  async search(page: Page, searchTerm: string): Promise<ProductResult[]> {
-    console.log(`[可達] 執行穩定版搜尋: "${searchTerm}"`)
+  async search(page: Page, searchTerm: string, filters?: any): Promise<ProductResult[]> {
+    console.log(`[可達] 執行穩定版搜尋: "${searchTerm}", Filters: ${JSON.stringify(filters)}`)
 
     // 直接跳轉到產品區域
     if (!page.url().includes('/Product/Product')) {

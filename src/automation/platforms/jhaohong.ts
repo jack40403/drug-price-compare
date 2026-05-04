@@ -60,8 +60,8 @@ export class JhaoHongConnector extends Connector {
     return success
   }
 
-  async search(page: Page, searchTerm: string): Promise<ProductResult[]> {
-    console.log(`[JhaoHong] 執行常駐搜尋框搜尋: "${searchTerm}"`)
+  async search(page: Page, searchTerm: string, filters?: any): Promise<ProductResult[]> {
+    console.log(`[JhaoHong] 執行常駐搜尋框搜尋: "${searchTerm}", Filters: ${JSON.stringify(filters)}`)
     
     try {
       // 1. [優化] 定位搜尋框 (如果沒看到就滾動尋找)
@@ -88,10 +88,10 @@ export class JhaoHongConnector extends Connector {
         await input.click()
         await page.waitForTimeout(300)
 
-        // 3. 自動分流：偵測內容並切換搜尋模式 (名稱 vs 健保碼)
-        const isCode = this.isNHICode(searchTerm)
+        // 3. 根據手動勾選切換搜尋模式 (名稱 vs 健保碼)
+        const isCode = filters?.code === true;
         const filterValue = isCode ? 'nhi' : 'name'
-        console.log(`[兆宇] 偵測到${isCode ? '健保碼' : '品名'}格式，自動切換模式為: ${filterValue}`)
+        console.log(`[兆宇] 手動切換模式為: ${filterValue}`)
         
         try {
           const filterSelect = page.locator('select.filter').first()

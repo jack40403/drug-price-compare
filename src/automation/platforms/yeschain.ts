@@ -107,7 +107,7 @@ export class YesChainConnector extends Connector {
     return await this.isLoggedIn(page)
   }
 
-  async search(page: Page, searchTerm: string): Promise<ProductResult[]> {
+  async search(page: Page, searchTerm: string, filters?: any): Promise<ProductResult[]> {
     try {
       console.log('[好鄰居] 正在強制跳轉至產品搜尋頁面...')
       // 導向正確的搜尋頁面路徑

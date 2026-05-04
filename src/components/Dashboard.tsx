@@ -37,6 +37,8 @@ const Dashboard = () => {
   const [captchaQueue, setCaptchaQueue] = useState<any[]>([])
   const [captchaInputs, setCaptchaInputs] = useState<Record<string, string>>({})
   const [bridgeConnected, setBridgeConnected] = useState(true) // 預設為 true，網頁版會更新
+  const [nhiFilter, setNhiFilter] = useState<'name' | 'code' | 'component'>('name')
+  const [marketFilter, setMarketFilter] = useState<'name' | 'code' | 'component'>('name')
 
   const platformColorMap: Record<string, string> = {
     'binli': 'bg-blue-100 text-blue-800 border-blue-200',
@@ -135,6 +137,16 @@ const Dashboard = () => {
         (window as any).electronAPI.on('clear-captchas', () => {
           setCaptchaQueue([]);
           setCaptchaInputs({});
+        });
+
+        (window as any).electronAPI.on('clear-captcha-for-platform', (platformId: string) => {
+          console.log(`[Dashboard] 收到清除指令 (平台: ${platformId})`);
+          setCaptchaQueue(prev => prev.filter(q => q.platformId !== platformId));
+          setCaptchaInputs(prev => {
+            const next = { ...prev };
+            delete next[platformId];
+            return next;
+          });
         });
       }
     } else {
@@ -246,11 +258,18 @@ const Dashboard = () => {
     setIsSearching(true)
     setIsStopping(false)
     setSearchResults([])
-    setNhiResults([])
 
     try {
       // 只發動各平台即時比價，僅包含已勾選的平台
-      const platformResults = await (window as any).electronAPI.performSearch(searchTerm, selectedPlatforms)
+      const platformResults = await (window as any).electronAPI.invoke('perform-search', { 
+        searchTerm, 
+        platforms: selectedPlatforms, 
+        filters: {
+          name: marketFilter === 'name',
+          code: marketFilter === 'code',
+          component: marketFilter === 'component'
+        }
+      })
 
       // Calculate cheapest
       if (platformResults) {
@@ -289,7 +308,14 @@ const Dashboard = () => {
     setSelectedDosage(null)
 
     try {
-      const localResults = await (window as any).electronAPI.invoke('search-nhi-local', finalTerm)
+      const localResults = await (window as any).electronAPI.invoke('search-nhi-local', { 
+        searchTerm: finalTerm, 
+        filters: {
+          name: nhiFilter === 'name',
+          code: nhiFilter === 'code',
+          component: nhiFilter === 'component'
+        }
+      })
       setNhiResults(localResults || [])
       if (!customTerm) setNhiSearchTerm(finalTerm)
     } catch (err) {
@@ -519,14 +545,46 @@ const Dashboard = () => {
 
         <form onSubmit={handleNhiSearch} className="bg-slate-800 rounded-xl border border-white/10 overflow-hidden shadow-2xl">
           <div className="flex flex-col md:flex-row items-stretch">
-            <div className="flex-1 relative bg-transparent border-b md:border-b-0 md:border-r border-white/5">
+            <div className="flex-1 relative bg-transparent border-b md:border-b-0 md:border-r border-white/5 flex items-center">
               <input
                 type="text"
                 value={nhiSearchTerm}
                 onChange={(e) => setNhiSearchTerm(e.target.value)}
                 placeholder="輸入商品名稱、健保碼或關鍵字..."
-                className="block w-full pl-8 pr-8 py-6 text-lg font-bold bg-transparent outline-none placeholder:text-slate-600 text-white"
+                className="block flex-1 pl-8 pr-4 py-6 text-lg font-bold bg-transparent outline-none placeholder:text-slate-600 text-white"
               />
+              <div className="flex items-center gap-4 px-6 border-l border-white/5">
+                <label className="flex items-center gap-2 cursor-pointer group">
+                  <input 
+                    type="radio" 
+                    name="nhi-filter"
+                    checked={nhiFilter === 'name'} 
+                    onChange={() => setNhiFilter('name')}
+                    className="w-4 h-4 border-slate-600 bg-slate-900 text-amber-500 focus:ring-amber-500/20"
+                  />
+                  <span className={`text-xs font-black uppercase tracking-wider transition-colors ${nhiFilter === 'name' ? 'text-amber-500' : 'text-slate-500 group-hover:text-slate-300'}`}>藥品名</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer group">
+                  <input 
+                    type="radio" 
+                    name="nhi-filter"
+                    checked={nhiFilter === 'code'} 
+                    onChange={() => setNhiFilter('code')}
+                    className="w-4 h-4 border-slate-600 bg-slate-900 text-amber-500 focus:ring-amber-500/20"
+                  />
+                  <span className={`text-xs font-black uppercase tracking-wider transition-colors ${nhiFilter === 'code' ? 'text-amber-500' : 'text-slate-500 group-hover:text-slate-300'}`}>健保碼</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer group">
+                  <input 
+                    type="radio" 
+                    name="nhi-filter"
+                    checked={nhiFilter === 'component'} 
+                    onChange={() => setNhiFilter('component')}
+                    className="w-4 h-4 border-slate-600 bg-slate-900 text-amber-500 focus:ring-amber-500/20"
+                  />
+                  <span className={`text-xs font-black uppercase tracking-wider transition-colors ${nhiFilter === 'component' ? 'text-amber-500' : 'text-slate-500 group-hover:text-slate-300'}`}>成分</span>
+                </label>
+              </div>
             </div>
             <div className="p-2 flex items-center justify-center bg-white/5 gap-3">
               <button
@@ -784,15 +842,47 @@ const Dashboard = () => {
 
         <form onSubmit={handleSearch} className="bg-slate-800 rounded-[2rem] shadow-2xl shadow-amber-900/20 border border-white/10 overflow-hidden group focus-within:ring-8 focus-within:ring-amber-500/10 transition-all duration-300">
           <div className="flex flex-col md:flex-row items-stretch">
-            <div className="flex-1 relative bg-transparent border-b md:border-b-0 md:border-r border-white/5">
+            <div className="flex-1 relative bg-transparent border-b md:border-b-0 md:border-r border-white/5 flex flex-col justify-center">
               <input
                 id="market-search-input"
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="輸入商品名稱或關鍵字進行全平台比價..."
-                className="block w-full px-12 py-16 text-5xl font-black bg-transparent outline-none placeholder:text-slate-700 text-white tracking-tighter"
+                className="block w-full px-12 pt-16 pb-4 text-5xl font-black bg-transparent outline-none placeholder:text-slate-700 text-white tracking-tighter"
               />
+              <div className="flex items-center gap-8 px-12 pb-8">
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <input 
+                    type="radio" 
+                    name="market-filter"
+                    checked={marketFilter === 'name'} 
+                    onChange={() => setMarketFilter('name')}
+                    className="w-6 h-6 border-slate-600 bg-slate-900 text-amber-500 focus:ring-amber-500/20"
+                  />
+                  <span className={`text-xl font-black uppercase tracking-widest transition-colors ${marketFilter === 'name' ? 'text-amber-500' : 'text-slate-600 group-hover:text-slate-400'}`}>藥品名稱 (DRUG NAME)</span>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <input 
+                    type="radio" 
+                    name="market-filter"
+                    checked={marketFilter === 'code'} 
+                    onChange={() => setMarketFilter('code')}
+                    className="w-6 h-6 border-slate-600 bg-slate-900 text-amber-500 focus:ring-amber-500/20"
+                  />
+                  <span className={`text-xl font-black uppercase tracking-widest transition-colors ${marketFilter === 'code' ? 'text-amber-500' : 'text-slate-600 group-hover:text-slate-400'}`}>健保代碼 (NHI CODE)</span>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <input 
+                    type="radio" 
+                    name="market-filter"
+                    checked={marketFilter === 'component'} 
+                    onChange={() => setMarketFilter('component')}
+                    className="w-6 h-6 border-slate-600 bg-slate-900 text-amber-500 focus:ring-amber-500/20"
+                  />
+                  <span className={`text-xl font-black uppercase tracking-widest transition-colors ${marketFilter === 'component' ? 'text-amber-500' : 'text-slate-600 group-hover:text-slate-400'}`}>成分名稱 (COMPONENT)</span>
+                </label>
+              </div>
             </div>
             <div className="p-6 flex items-center justify-center bg-white/5">
               <div className="flex items-stretch gap-4 w-full h-full">
@@ -863,13 +953,35 @@ const Dashboard = () => {
           <tbody className="">
             {(() => {
               // 實施過濾邏輯
-              let displayData = [...searchResults];
-              
-              // 1. 精確過濾
-              if (isStrictFilter && searchTerm.trim()) {
-                const regex = new RegExp(`(^|[^\\u4e00-\\u9fa5])${searchTerm}`, 'i');
-                displayData = displayData.filter(p => regex.test(p.name));
-              }
+              // 1. 準備顯示資料 (不再物理刪除)
+              let displayData = searchResults.map(p => {
+                const term = searchTerm.trim().toLowerCase();
+                
+                // 基本匹配
+                const basicMatch = (
+                  p.name?.toLowerCase().includes(term) ||
+                  (p.nhiCode?.toLowerCase() === term || p.nhiCode?.toLowerCase().includes(term)) ||
+                  p.spec?.toLowerCase().includes(term) ||
+                  p.memo?.toLowerCase().includes(term)
+                );
+
+                // 複方過濾邏輯 (如果開啟精確過濾)
+                let isMatch = basicMatch;
+                if (isStrictFilter && term && basicMatch) {
+                  const isSearchCompound = term.includes('/') || term.includes('+');
+                  const isProductCompound = (p.name + p.spec).includes('/') || (p.name + p.spec).includes('+');
+                  
+                  // 如果搜尋的是單方 (沒斜線)，但產品是複方 (有斜線)，則隱藏
+                  if (!isSearchCompound && isProductCompound) {
+                    isMatch = false;
+                  }
+                }
+
+                // 如果沒開啟過濾，或是符合過濾條件，則顯示
+                const finalVisibility = !isStrictFilter || !term || isMatch;
+
+                return { ...p, isMatch: finalVisibility };
+              });
 
               // 2. 排序邏輯
               if (sortConfig.key && sortConfig.direction) {
@@ -912,7 +1024,7 @@ const Dashboard = () => {
                   '!border-purple-400';
 
                 return (
-                  <tr key={idx} className="border-b border-white/10 group">
+                  <tr key={idx} className="border-b border-white/10 group" style={{ display: product.isMatch ? 'table-row' : 'none' }}>
                     <td className={`${bgColor} ${borderColor} !border-l-8 font-medium`}>
                       <span className="px-2 py-1 rounded-full text-[10px] font-black bg-slate-950 text-white border border-white/20 uppercase">
                         {product.platform}

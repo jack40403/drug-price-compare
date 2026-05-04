@@ -71,8 +71,8 @@ export class YuShengConnector extends Connector {
     return await this.isLoggedIn(page)
   }
 
-  async search(page: Page, searchTerm: string): Promise<ProductResult[]> {
-    console.log(`[宇盛] 正準備發動搜尋: "${searchTerm}"`)
+  async search(page: Page, searchTerm: string, filters?: any): Promise<ProductResult[]> {
+    console.log(`[宇盛] 正準備發動搜尋: "${searchTerm}", Filters: ${JSON.stringify(filters)}`)
     
     try {
       await page.goto('https://www.yusheng0307.com/product.html', { waitUntil: 'networkidle' })

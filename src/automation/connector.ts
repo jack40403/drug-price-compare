@@ -59,18 +59,6 @@ export abstract class Connector {
   }
 
   /**
-   * 辨識是否為健保代碼 (NHI Code)
-   * 規則：末兩碼為 00 或 G0 一律視作健保碼
-   */
-  protected isNHICode(term: string): boolean {
-    const cleanTerm = term.trim();
-    // 偵測是否末兩碼為 00 或 G0 (不分大小寫)
-    const isCode = /(00|G0)$/i.test(cleanTerm);
-    console.log(`[系統判定] 輸入值: "${cleanTerm}", 判定為健保碼: ${isCode}`);
-    return isCode;
-  }
-
-  /**
    * Check if the current state is "Logged In"
    */
   abstract isLoggedIn(page: Page): Promise<boolean>;
@@ -83,7 +71,7 @@ export abstract class Connector {
   /**
    * Search for a product and return results
    */
-  abstract search(page: Page, searchTerm: string): Promise<ProductResult[]>;
+  abstract search(page: Page, searchTerm: string, filters?: any): Promise<ProductResult[]>;
 
   /**
    * Common helper to navigate and ensure login
