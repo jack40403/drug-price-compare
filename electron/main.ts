@@ -105,6 +105,26 @@ process.env.VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL'] as string
 
 let win: BrowserWindow | null
 
+// 單一視窗實例鎖定：若已有另一個執行個體，則聚焦既有視窗並退出
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+  })
+  app.whenReady().then(createWindow)
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit()
+      win = null
+    }
+  })
+}
+
 /**
  * AutomationManager
  * Manages a persistent browser context and a pool of pages for each platform
@@ -202,15 +222,6 @@ function createWindow() {
     })
   }
 }
-
-app.whenReady().then(createWindow)
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-    win = null
-  }
-})
 
 // IPC Handlers
 ipcMain.handle('get-credentials', (_event, platformId) => {
