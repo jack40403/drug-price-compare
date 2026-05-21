@@ -551,7 +551,8 @@ const Dashboard = () => {
                 value={nhiSearchTerm}
                 onChange={(e) => setNhiSearchTerm(e.target.value)}
                 placeholder="輸入商品名稱、健保碼或關鍵字..."
-                className="block flex-1 pl-8 pr-4 py-6 text-lg font-bold bg-transparent outline-none placeholder:text-slate-600 text-white"
+                className="block flex-1 pl-8 pr-4 py-5 font-bold bg-transparent outline-none placeholder:text-slate-600 text-white"
+                style={{ fontSize: '1.5rem' }}
               />
               <div className="flex items-center gap-4 px-6 border-l border-white/5">
                 <label className="flex items-center gap-2 cursor-pointer group">
@@ -849,9 +850,10 @@ const Dashboard = () => {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="輸入商品名稱或關鍵字進行全平台比價..."
-                className="block w-full px-12 pt-16 pb-4 text-5xl font-black bg-transparent outline-none placeholder:text-slate-700 text-white tracking-tighter"
+                className="block w-full outline-none tracking-tighter font-black placeholder:text-slate-600"
+                style={{ fontSize: '1.5rem', padding: '1.25rem 2.5rem 1rem', backgroundColor: 'transparent', color: 'white' }}
               />
-              <div className="flex items-center gap-8 px-12 pb-8">
+              <div className="flex items-center gap-8 px-14 pb-10">
                 <label className="flex items-center gap-3 cursor-pointer group">
                   <input 
                     type="radio" 
@@ -884,12 +886,12 @@ const Dashboard = () => {
                 </label>
               </div>
             </div>
-            <div className="p-6 flex items-center justify-center bg-white/5">
+            <div className="p-8 flex items-center justify-center bg-white/5">
               <div className="flex items-stretch gap-4 w-full h-full">
                 <button
                   type="button"
                   onClick={() => setIsStrictFilter(!isStrictFilter)}
-                  className={`flex-1 px-4 py-6 text-xl font-black flex items-center justify-center gap-3 transition-all active:scale-95 clinical-btn-tactile rounded-sm ${
+                  className={`flex-1 px-4 py-8 text-xl font-black flex items-center justify-center gap-3 transition-all active:scale-95 clinical-btn-tactile rounded-sm ${
                     isStrictFilter 
                       ? 'clinical-btn-tactile-blue' 
                       : 'clinical-btn-tactile-slate opacity-60'
@@ -912,7 +914,7 @@ const Dashboard = () => {
                 <button
                   type="submit"
                   disabled={isSearching}
-                  className="clinical-btn-tactile clinical-btn-tactile-blue flex-1 px-6 py-4 text-lg font-black flex items-center justify-center gap-3 transition-all active:scale-95 rounded-sm"
+                  className="clinical-btn-tactile clinical-btn-tactile-blue flex-1 px-6 py-8 text-xl font-black flex items-center justify-center gap-3 transition-all active:scale-95 rounded-sm"
                 >
                   {isSearching ? <Loader2 size={24} className="animate-spin" /> : <Zap size={24} className="fill-current" />}
                   <span>{isSearching ? '抓取中...' : '啟動比價'}</span>

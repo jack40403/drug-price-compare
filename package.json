@@ -6,7 +6,46 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && electron-builder",
+    "build:win": "tsc && vite build && electron-builder --win --x64",
     "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.drugprice.compare.app",
+    "productName": "藥品比價小精靈",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "src/assets/**/*",
+      "!node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "健保藥品離線資料庫",
+        "to": "健保藥品離線資料庫",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "藥品外觀",
+        "to": "藥品外觀",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "藥品比價小精靈",
+      "installerLanguages": ["zh_TW"],
+      "language": "1028"
+    }
   },
   "dependencies": {
     "electron-store": "^8.1.0",
