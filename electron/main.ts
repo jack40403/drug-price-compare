@@ -873,7 +873,7 @@ function startHttpBridge() {
           
           let result;
           if (channel === 'perform-search') {
-            result = await performSearch(args[0].searchTerm, args[0].platforms);
+            result = await performSearch(args[0].searchTerm, args[0].platforms, args[0].filters);
           } else if (channel === 'submit-captcha') {
             const { platformId, code } = args[0];
             const captchaReq = pendingCaptchas.find(r => r.platformId === platformId);

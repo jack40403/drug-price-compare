@@ -9,8 +9,8 @@ export class ChahwaConnector extends Connector {
   protected context: BrowserContext
   private savedCreds: any = null
 
-  constructor(context: BrowserContext) {
-    super(context)
+  constructor(context: BrowserContext, captchaHandler?: (platformId: string, platformName: string, image: string) => Promise<string>) {
+    super(context, captchaHandler)
     this.context = context
   }
 
@@ -112,8 +112,6 @@ export class ChahwaConnector extends Connector {
     const MAX_PAGES = 50 // 安全限制
 
     try {
-      await performSearchStep()
-      
       while (pageCount <= MAX_PAGES) {
         console.log(`[嘉鏵] 正在抓取第 ${pageCount} 頁...`)
         

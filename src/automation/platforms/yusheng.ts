@@ -8,8 +8,8 @@ export class YuShengConnector extends Connector {
   baseUrl = 'https://www.yusheng0307.com/'
 
   protected context: BrowserContext
-  constructor(context: BrowserContext) {
-    super(context)
+  constructor(context: BrowserContext, captchaHandler?: (platformId: string, platformName: string, image: string) => Promise<string>) {
+    super(context, captchaHandler)
     this.context = context
   }
 

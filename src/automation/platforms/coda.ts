@@ -9,8 +9,8 @@ export class CodaConnector extends Connector {
   baseUrl = 'https://www.codadrug.com.tw/'
 
   protected context: BrowserContext
-  constructor(context: BrowserContext) {
-    super(context)
+  constructor(context: BrowserContext, captchaHandler?: (platformId: string, platformName: string, image: string) => Promise<string>) {
+    super(context, captchaHandler)
     this.context = context
   }
 
