@@ -3,6 +3,7 @@ import path, { join } from 'path'
 import fs from 'fs'
 import http from 'http'
 import { parse as parseUrl } from 'url'
+import { spawn } from 'child_process'
 import type { Page, BrowserContext, Browser } from 'playwright'
 import { chromium } from 'playwright'
 import Store from './store'
@@ -116,7 +117,10 @@ if (!gotTheLock) {
       win.focus()
     }
   })
-  app.whenReady().then(createWindow)
+  app.whenReady().then(async () => {
+    await ensurePlaywrightBrowsers()
+    createWindow()
+  })
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
       app.quit()
@@ -192,6 +196,91 @@ class AutomationManager {
 const automationManager = new AutomationManager()
 let isSearchInterrupted = false
 let pendingCaptchas: any[] = []
+
+/**
+ * 檢查 Playwright Chromium 瀏覽器是否存在，若不存在則自動安裝
+ */
+async function ensurePlaywrightBrowsers(): Promise<void> {
+  try {
+    const execPath = chromium.executablePath()
+    if (fs.existsSync(execPath)) {
+      logToFile(`[Setup] Chromium 已就緒: ${execPath}`)
+      return
+    }
+  } catch (e) {
+    // executablePath() 可能在瀏覽器未安裝時拋出例外
+  }
+
+  logToFile('[Setup] 未偵測到 Playwright Chromium，開始自動安裝...')
+
+  const setupWin = new BrowserWindow({
+    width: 520,
+    height: 280,
+    resizable: false,
+    frame: false,
+    alwaysOnTop: true,
+    webPreferences: { nodeIntegration: true, contextIsolation: false },
+    title: '首次設定',
+  })
+  setupWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`
+    <html><body style="margin:0;background:#0f172a;color:#fff;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;">
+      <div style="font-size:32px">⚙️</div>
+      <div style="font-size:18px;font-weight:900">首次安裝瀏覽器核心</div>
+      <div id="msg" style="font-size:13px;color:#94a3b8">正在下載 Playwright Chromium，請稍候...</div>
+      <div style="width:360px;height:6px;background:#1e293b;border-radius:9999px;overflow:hidden">
+        <div id="bar" style="height:100%;width:10%;background:#3b82f6;border-radius:9999px;animation:slide 1.2s ease-in-out infinite alternate"></div>
+      </div>
+      <style>@keyframes slide{to{width:90%}}</style>
+    </body></html>
+  `)}`)
+
+  await new Promise<void>((resolve, reject) => {
+    // 使用專案內的 playwright CLI 進行安裝
+    const playwrightCli = app.isPackaged
+      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js')
+      : path.join(__dirname, '../node_modules/playwright/cli.js')
+
+    const nodeExec = process.execPath
+    const args = app.isPackaged
+      ? [playwrightCli, 'install', 'chromium']
+      : ['node', playwrightCli, 'install', 'chromium']
+
+    // 嘗試用 npx playwright install（開發環境）或直接呼叫 CLI
+    const proc = spawn(
+      app.isPackaged ? nodeExec : 'npx',
+      app.isPackaged ? [playwrightCli, 'install', 'chromium'] : ['playwright', 'install', 'chromium'],
+      { shell: true, stdio: 'pipe' }
+    )
+
+    proc.stdout?.on('data', (data) => logToFile(`[playwright-install] ${data.toString().trim()}`))
+    proc.stderr?.on('data', (data) => logToFile(`[playwright-install] ${data.toString().trim()}`))
+
+    proc.on('close', (code) => {
+      setupWin.destroy()
+      if (code === 0) {
+        logToFile('[Setup] Playwright Chromium 安裝成功')
+        resolve()
+      } else {
+        logToFile(`[Setup] 安裝失敗 (exit code: ${code})`)
+        dialog.showErrorBox(
+          '瀏覽器核心安裝失敗',
+          `Playwright Chromium 自動安裝失敗 (exit ${code})。\n\n請手動執行：\nnpx playwright install chromium`
+        )
+        resolve() // 繼續啟動，讓使用者看到主視窗後再操作
+      }
+    })
+
+    proc.on('error', (err) => {
+      setupWin.destroy()
+      logToFile(`[Setup] spawn 錯誤: ${err.message}`)
+      dialog.showErrorBox(
+        '瀏覽器核心安裝失敗',
+        `無法啟動安裝程序：${err.message}\n\n請手動執行：\nnpx playwright install chromium`
+      )
+      resolve()
+    })
+  })
+}
 
 function createWindow() {
   win = new BrowserWindow({

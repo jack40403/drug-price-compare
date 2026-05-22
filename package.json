@@ -6,7 +6,62 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && electron-builder",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "install:browsers": "playwright install chromium"
+  },
+  "build": {
+    "appId": "tw.pharmacy.drug-price-compare",
+    "productName": "藥師比價專家",
+    "copyright": "Copyright © 2024",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "!**/*.ts",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "健保藥品離線資料庫",
+        "to": "健保藥品離線資料庫",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "藥品外觀",
+        "to": "藥品外觀",
+        "filter": ["**/*"]
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/playwright/**/*",
+      "node_modules/playwright-core/**/*",
+      "node_modules/iconv-lite/**/*",
+      "node_modules/electron-store/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "藥師比價專家",
+      "runAfterFinish": true
+    }
   },
   "dependencies": {
     "electron-store": "^8.1.0",
