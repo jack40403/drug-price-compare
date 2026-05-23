@@ -62,7 +62,17 @@ export class JhaoHongConnector extends Connector {
 
   async search(page: Page, searchTerm: string, filters?: any): Promise<ProductResult[]> {
     console.log(`[JhaoHong] 執行常駐搜尋框搜尋: "${searchTerm}", Filters: ${JSON.stringify(filters)}`)
-    
+
+    // 確保在產品列表頁（有搜尋框的頁面）
+    if (!page.url().includes('prdindex.php') && !page.url().includes('order.php')) {
+      console.log('[JhaoHong] 導向產品搜尋頁面 prdindex.php...')
+      await page.goto('https://www.jhao-hong.com.tw/prdindex.php', { waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(1500)
+      // 自動清除可能出現的公告彈窗
+      const alertBtn = await page.$('button.confirm.button')
+      if (alertBtn) { await alertBtn.click(); await page.waitForTimeout(500) }
+    }
+
     try {
       // 1. [優化] 定位搜尋框 (如果沒看到就滾動尋找)
       let input = await page.$('input.search')

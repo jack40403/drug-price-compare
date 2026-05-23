@@ -125,20 +125,40 @@ export class ChahwaConnector extends Connector {
             const specEl = item.querySelector('.spec') as HTMLElement;
             if (!specEl) return;
 
+            const specText = (item as HTMLElement).innerText || '';
             const specLines = specEl.innerText.split('\n').map(l => l.trim()).filter(Boolean);
-            
-            const name = specLines[2] || specLines[0] || '';
-            const nhiCode = specLines[0]?.match(/[A-Z0-9]{10}/)?.[0] || '';
-            const nhiPriceMatch = specLines[1]?.match(/健保價:\s*([\d,.]+)/);
+
+            // 健保碼：找第一個符合 10 碼英數的行
+            const nhiCodeLine = specLines.find(l => /^[A-Z][A-Z0-9]\d{8}$/.test(l)) || '';
+            const nhiCode = nhiCodeLine || (specLines[0]?.match(/[A-Z][A-Z0-9]\d{8}/)?.[0] || '');
+
+            // 健保價：找包含「健保價」的行
+            const nhiPriceLine = specLines.find(l => l.includes('健保價')) || '';
+            const nhiPriceMatch = nhiPriceLine.match(/([\d,.]+)/);
             const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, '')) : 0;
-            
+
+            // 藥品名稱：找不是健保碼、不是價格行、不是庫存行、長度 > 3 的第一行
+            const isNhiCodeLine = (l: string) => /^[A-Z][A-Z0-9]\d{8}$/.test(l);
+            const isPriceLine = (l: string) => l.includes('健保價') || /^\d[\d,]+\s*\//.test(l);
+            const isStockLine = (l: string) => l.includes('庫存');
+            const name = specLines.find(l =>
+              l.length > 3 && !isNhiCodeLine(l) && !isPriceLine(l) && !isStockLine(l)
+            ) || specLines[0] || '';
+
+            // 規格：藥名之後的第一個有效行
+            const nameIdx = specLines.indexOf(name);
+            const spec = (nameIdx >= 0 ? specLines.slice(nameIdx + 1) : [])
+              .find(l => l.length > 1 && !isNhiCodeLine(l) && !isPriceLine(l) && !isStockLine(l)) || '';
+
+            // 庫存
             const stockIndex = specLines.findIndex(l => l.includes('庫存'));
+            const stockStatus = stockIndex >= 0 ? specLines[stockIndex].replace(/庫存[:：]?/, '').trim() : '未知';
+
+            // 售價：庫存行前一行，格式 XX / 單位
             const priceLine = (stockIndex > 0) ? specLines[stockIndex - 1] : '';
-            
             const priceMatch = priceLine.match(/([\d,.]+)\s*\/\s*([^\n\s]+)/);
             const price = priceMatch ? parseFloat(priceMatch[1].replace(/,/g, '')) : 0;
             const unit = priceMatch ? priceMatch[2].trim() : (priceLine.includes('/') ? priceLine.split('/')[1].trim() : '單位');
-            const stockStatus = stockIndex >= 0 ? specLines[stockIndex].replace('庫存:', '').trim() : '未知';
 
             const itemText = (item as HTMLElement).innerText || '';
             const expiryMatch = itemText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
@@ -148,7 +168,7 @@ export class ChahwaConnector extends Connector {
               products.push({
                 platform,
                 name: name,
-                spec: specLines[3] || '',
+                spec: spec,
                 price: isNaN(price) ? 0 : price,
                 unit: unit,
                 stock: stockStatus,

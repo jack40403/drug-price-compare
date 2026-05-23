@@ -48,7 +48,7 @@ export class MDTConnector extends Connector {
       await page.waitForURL(/Shop|Product|Search/, { timeout: 15000 })
       await page.goto('https://www.mdtky.com.tw/Shop/Product/index', { waitUntil: 'domcontentloaded' })
     } catch (e) {}
-    return true
+    return await this.isLoggedIn(page)
   }
 
   async search(page: Page, searchTerm: string, filters?: any): Promise<ProductResult[]> {
