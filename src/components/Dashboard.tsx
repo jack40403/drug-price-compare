@@ -849,7 +849,7 @@ const Dashboard = () => {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="輸入商品名稱或關鍵字進行全平台比價..."
-                className="block w-full px-12 pt-16 pb-4 text-5xl font-black bg-transparent outline-none placeholder:text-slate-700 text-white tracking-tighter"
+                className="block w-full px-12 pt-16 pb-12 text-5xl font-black bg-transparent outline-none placeholder:text-slate-700 text-white tracking-tighter"
               />
               <div className="flex items-center gap-8 px-12 pb-8">
                 <label className="flex items-center gap-3 cursor-pointer group">

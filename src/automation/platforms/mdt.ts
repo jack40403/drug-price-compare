@@ -23,7 +23,7 @@ export class MDTConnector extends Connector {
     await this.humanType(page, 'input#Account', creds.username)
     await this.humanType(page, 'input#PWD', creds.password)
 
-    let alreadyNavigated = false
+    let formSubmitted = false
 
     if (this.captchaHandler) {
       try {
@@ -40,28 +40,31 @@ export class MDTConnector extends Connector {
         ]);
 
         if (code === 'SUCCESS') {
-          alreadyNavigated = true
+          formSubmitted = true
         } else if (code !== 'MANUAL' && code) {
+          // 有驗證碼：填入後用 Enter 送出（原本可運作的方式）
           await page.fill(inputSelector, code)
+          await page.keyboard.press('Enter')
+          formSubmitted = true
         }
       } catch (e) {
-        // 沒有驗證碼圖片或超時，繼續走一般流程
+        // 沒有驗證碼圖片，繼續走無驗證碼流程
       }
     }
 
-    if (!alreadyNavigated) {
-      // 核心修正：確保登入表單被送出（不論有無驗證碼）
+    // 無驗證碼時才需要明確點擊登入按鈕
+    if (!formSubmitted) {
       try {
-        await page.click('button[type="submit"], input[type="submit"], button:has-text("登入"), a:has-text("登入")', { timeout: 5000 })
+        await page.click('button[type="submit"], input[type="submit"]', { timeout: 5000 })
       } catch (e) {
         await page.keyboard.press('Enter')
       }
-      try {
-        await page.waitForURL(/Shop|Product|Search/, { timeout: 15000 })
-        await page.goto('https://www.mdtky.com.tw/Shop/Product/index', { waitUntil: 'domcontentloaded' })
-      } catch (e) {}
     }
 
+    try {
+      await page.waitForURL(/Shop|Product|Search/, { timeout: 15000 })
+      await page.goto('https://www.mdtky.com.tw/Shop/Product/index', { waitUntil: 'domcontentloaded' })
+    } catch (e) {}
     return await this.isLoggedIn(page)
   }
 
