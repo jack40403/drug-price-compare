@@ -551,7 +551,7 @@ const Dashboard = () => {
                 value={nhiSearchTerm}
                 onChange={(e) => setNhiSearchTerm(e.target.value)}
                 placeholder="輸入商品名稱、健保碼或關鍵字..."
-                className="block flex-1 pl-8 pr-4 py-6 text-lg font-bold bg-transparent outline-none placeholder:text-slate-600 text-white"
+                className="block flex-1 pl-10 pr-4 py-10 text-3xl font-bold bg-transparent outline-none placeholder:text-slate-600 text-white"
               />
               <div className="flex items-center gap-4 px-6 border-l border-white/5">
                 <label className="flex items-center gap-2 cursor-pointer group">
@@ -590,14 +590,14 @@ const Dashboard = () => {
               <button
                 type="button"
                 onClick={handleClearNhiSearch}
-                className="clinical-btn-tactile clinical-btn-tactile-slate px-6 py-4 text-lg font-black whitespace-nowrap rounded-sm"
+                className="clinical-btn-tactile clinical-btn-tactile-slate px-8 py-6 text-xl font-black whitespace-nowrap rounded-sm"
               >
                 清空
               </button>
               <button
                 type="submit"
                 disabled={isNhiSearching}
-                className="clinical-btn-tactile clinical-btn-tactile-blue w-full px-8 py-4 text-xl font-black flex items-center justify-center gap-3 rounded-sm"
+                className="clinical-btn-tactile clinical-btn-tactile-blue w-full px-10 py-6 text-2xl font-black flex items-center justify-center gap-3 rounded-sm"
               >
                 {isNhiSearching ? <Loader2 size={24} className="animate-spin" /> : null}
                 <span>搜尋</span>
