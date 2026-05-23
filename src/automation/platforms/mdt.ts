@@ -22,7 +22,9 @@ export class MDTConnector extends Connector {
 
     await this.humanType(page, 'input#Account', creds.username)
     await this.humanType(page, 'input#PWD', creds.password)
-    
+
+    let alreadyNavigated = false
+
     if (this.captchaHandler) {
       try {
         const captchaImg = page.locator('#validimg, img#ImgCaptcha, img[src*="Captcha"]').first()
@@ -36,18 +38,30 @@ export class MDTConnector extends Connector {
           page.waitForFunction((s) => (document.querySelector(s) as HTMLInputElement)?.value.length >= 4, inputSelector, { timeout: 60000 }).then(() => 'MANUAL'),
           page.waitForFunction(() => window.location.href.includes('Shop/'), { timeout: 60000 }).then(() => 'SUCCESS')
         ]);
-        
-        if (code !== 'SUCCESS' && code !== 'MANUAL' && code) {
+
+        if (code === 'SUCCESS') {
+          alreadyNavigated = true
+        } else if (code !== 'MANUAL' && code) {
           await page.fill(inputSelector, code)
-          await page.keyboard.press('Enter')
         }
+      } catch (e) {
+        // 沒有驗證碼圖片或超時，繼續走一般流程
+      }
+    }
+
+    if (!alreadyNavigated) {
+      // 核心修正：確保登入表單被送出（不論有無驗證碼）
+      try {
+        await page.click('button[type="submit"], input[type="submit"], button:has-text("登入"), a:has-text("登入")', { timeout: 5000 })
+      } catch (e) {
+        await page.keyboard.press('Enter')
+      }
+      try {
+        await page.waitForURL(/Shop|Product|Search/, { timeout: 15000 })
+        await page.goto('https://www.mdtky.com.tw/Shop/Product/index', { waitUntil: 'domcontentloaded' })
       } catch (e) {}
     }
 
-    try {
-      await page.waitForURL(/Shop|Product|Search/, { timeout: 15000 })
-      await page.goto('https://www.mdtky.com.tw/Shop/Product/index', { waitUntil: 'domcontentloaded' })
-    } catch (e) {}
     return await this.isLoggedIn(page)
   }
 

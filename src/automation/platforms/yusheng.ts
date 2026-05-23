@@ -58,10 +58,23 @@ export class YuShengConnector extends Connector {
       console.log('[宇盛] 正在擬人化輸入帳密...')
       await this.humanType(page, 'input[name="account"]', creds.username)
       await this.humanType(page, 'input[name="pwd"]', creds.password)
-      
-      // 5. 點擊登入提交
-      await page.click('#ulogin_submit2', { force: true })
-      
+
+      // 5. 點擊登入提交 (多選取器備援，避免 ID 不存在造成 30 秒超時)
+      console.log('[宇盛] 送出登入表單...')
+      const submitSelectors = ['#ulogin_submit2', '#ulogin_submit', 'button[type="submit"]', 'input[type="submit"]', 'a:has-text("登入"):not(:has-text("會員登入"))']
+      let submitted = false
+      for (const sel of submitSelectors) {
+        try {
+          const btn = await page.$(sel)
+          if (btn) {
+            await btn.click({ force: true })
+            submitted = true
+            break
+          }
+        } catch (e) {}
+      }
+      if (!submitted) await page.keyboard.press('Enter')
+
       // 等待 Session 建立
       await page.waitForTimeout(2000)
     } catch (e) {
