@@ -10,44 +10,59 @@ export class MDTConnector extends Connector {
   async isLoggedIn(page: Page): Promise<boolean> {
     try {
       const currentUrl = page.url()
-      return currentUrl.includes('mdtky.com.tw/Shop/') || currentUrl.includes('Product/Search')
+      return currentUrl.includes('mdtky.com.tw/Shop/') || currentUrl.includes('Product/Search') || (currentUrl === 'https://www.mdtky.com.tw/')
     } catch (e) {
       return false
     }
   }
 
   async login(page: Page, creds: any): Promise<boolean> {
+    console.log('[蔓達特] 正在導向登入頁面...')
     await page.goto(this.baseUrl, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(1000)
+
     if (await this.isLoggedIn(page)) return true
 
-    await this.humanType(page, 'input#Account', creds.username)
-    await this.humanType(page, 'input#PWD', creds.password)
-    
+    console.log('[蔓達特] 正在打字輸入帳密 (擬人化)...')
+    await this.fastType(page, 'input#Account', creds.username)
+    await this.fastType(page, 'input#PWD', creds.password)
+
     if (this.captchaHandler) {
       try {
+        console.log('[蔓達特] 偵測驗證碼圖片...')
         const captchaImg = page.locator('#validimg, img#ImgCaptcha, img[src*="Captcha"]').first()
         await captchaImg.waitFor({ state: 'visible', timeout: 5000 })
+
         const screenshot = await captchaImg.screenshot({ type: 'png' })
         const base64Image = `data:image/png;base64,${screenshot.toString('base64')}`
-        const inputSelector = '#captchaTextBox, input#Code, input[name="Code"]'
 
-        const code = await Promise.race([
-          this.captchaHandler(this.platformId, this.platformName, base64Image),
-          page.waitForFunction((s) => (document.querySelector(s) as HTMLInputElement)?.value.length >= 4, inputSelector, { timeout: 60000 }).then(() => 'MANUAL'),
-          page.waitForFunction(() => window.location.href.includes('Shop/'), { timeout: 60000 }).then(() => 'SUCCESS')
-        ]);
-        
-        if (code !== 'SUCCESS' && code !== 'MANUAL' && code) {
-          await page.fill(inputSelector, code)
-          await page.keyboard.press('Enter')
-        }
-      } catch (e) {}
+        console.log('[蔓達特] 已截取驗證碼，正在請求使用者輸入...')
+        const code = await this.captchaHandler(this.platformId, this.platformName, base64Image)
+
+        console.log(`[蔓達特] 收到輸入: ${code}，正在自動填入並登入...`)
+        await page.waitForTimeout(500)
+        const inputSelector = '#captchaTextBox, input#Code, input[name="Code"]'
+        await page.fill(inputSelector, code)
+        await page.keyboard.press('Enter')
+        await page.click('input[type="submit"], input[value="登入"], #btnsend').catch(() => {})
+      } catch (e) {
+        console.log('[蔓達特] 無法自動定位驗證碼，切換回手動等待模式...')
+      }
     }
 
     try {
-      await page.waitForURL(/Shop|Product|Search/, { timeout: 15000 })
-      await page.goto('https://www.mdtky.com.tw/Shop/Product/index', { waitUntil: 'domcontentloaded' })
-    } catch (e) {}
+      console.log('[蔓達特] 等待登入狀態確認...')
+      await page.waitForFunction(() => {
+        const url = window.location.href
+        return url.includes('mdtky.com.tw/Shop/') || url.includes('Product/Search') || (url === 'https://www.mdtky.com.tw/')
+      }, { timeout: 120000 })
+
+      console.log('[蔓達特] 偵測到登入成功，正在跳轉至產品搜尋頁面...')
+      await page.goto('https://www.mdtky.com.tw/Shop/Product/', { waitUntil: 'domcontentloaded' })
+    } catch (e) {
+      console.warn('[蔓達特] 登入超時，請檢查驗證碼是否正確。')
+    }
+
     return true
   }
 

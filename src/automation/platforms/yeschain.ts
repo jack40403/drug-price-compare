@@ -48,8 +48,8 @@ export class YesChainConnector extends Connector {
       // 核心修正 2：使用 visible 過濾器避開分身
       console.log('[好鄰居] 正在填入帳號密碼 (精確定位可見欄位)...')
       await emailInput.waitFor({ state: 'visible', timeout: 8000 })
-      await this.humanType(page, 'input#email >> visible=true', creds.username)
-      await this.humanType(page, 'input#password >> visible=true', creds.password)
+      await this.fastType(page, 'input#email >> visible=true', creds.username)
+      await this.fastType(page, 'input#password >> visible=true', creds.password)
       
       // 偵測是否有驗證碼
       const rcode = page.locator('input#rcode').filter({ visible: true }).first()
@@ -113,11 +113,16 @@ export class YesChainConnector extends Connector {
       // 導向正確的搜尋頁面路徑
       await page.goto('https://www.yeschain.com.tw/b2bStoreCart/prod', { waitUntil: 'networkidle' })
       
-      // 等待搜尋框出現 (使用診斷後的精確 placeholder)
-      const searchInput = 'input[placeholder*="品名"]'
+      // 根據 filters 選擇對應搜尋框
+      let searchInput = 'input[placeholder*="品名"]'
+      if (filters?.code === true) {
+        searchInput = 'input[placeholder*="健保碼"]'
+      } else if (filters?.component === true) {
+        searchInput = 'input[placeholder*="成分"]'
+      }
       await page.waitForSelector(searchInput, { state: 'visible', timeout: 10000 })
-      
-      console.log(`[好鄰居] 執行搜尋: "${searchTerm}"`)
+
+      console.log(`[好鄰居] 執行搜尋: "${searchTerm}" → ${searchInput}`)
       await this.fastType(page, searchInput, searchTerm)
       
       // 點擊查詢按鈕 (更強悍的點擊策略：滾動到視線內 + 強制點擊最後一個「查詢」按鈕)
@@ -135,75 +140,110 @@ export class YesChainConnector extends Connector {
       return []
     }
 
-    const results: ProductResult[] = await page.evaluate((platform) => {
+    const allResults: ProductResult[] = []
+    let pageCount = 1
+    const MAX_PAGES = 50
+
+    while (pageCount <= MAX_PAGES) {
       try {
-        // 抓取所有資料列 (跳過標題列)
-        const rows = Array.from(document.querySelectorAll('tr')).filter(tr => {
-          return tr.innerText.includes('NT$') || /[A-Z0-9]{10}/.test(tr.innerText);
-        });
-
-        return rows.map((row) => {
-          const pTags = Array.from(row.querySelectorAll('p'));
-          const pTexts = pTags.map(p => p.innerText.trim());
-
-          // 1. 健保碼 (尋找符合 10 位英數的 P)
-          const nhiCode = pTexts.find(t => /^[A-Z0-9]{10}$/.test(t)) || '';
-
-          // 2. 健保價 (尋找包含 NT$ 的 P)
-          const nhiPriceText = pTexts.find(t => t.includes('NT$') && t.length < 15) || '';
-          const nhiPrice = parseFloat(nhiPriceText.replace(/[^0-9.]/g, '')) || 0;
-
-          // 3. 品名 (組合所有藥名相關的 P，排除健保碼和售價)
-          // 通常是中文名 + 英文名
-          const nameParts = pTexts.filter(t => 
-            t.length > 5 && 
-            !/^[A-Z0-9]{10}$/.test(t) && 
-            !t.includes('NT$') &&
-            !t.includes('粒/盒')
-          );
-          const name = nameParts.join(' ') || '未知藥品';
-
-          // 4. 售價與單位 (關鍵：從 OPTION 裡抓)
-          const optionEl = row.querySelector('option');
-          const priceText = optionEl ? optionEl.innerText.trim() : (pTexts.find(t => t.includes('NT$') && t.length > 15) || '');
-          const price = parseFloat(priceText.match(/NT\$\s*([\d,.]+)/)?.[1]?.replace(/,/g, '') || '0');
-          const unit = priceText.split('/').pop()?.trim() || '單位';
-
-          // 5. 庫存
-          const stockEl = row.querySelector('span.font-bold');
-          const stock = stockEl ? stockEl.innerText.trim() : '有貨';
-
-          // 6. 有效期限 (通常在 P 裡面或是組合在藥名裡)
-          const expiryMatch = row.innerText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
-          const expiry = expiryMatch ? expiryMatch[1] : '';
-
-          // 單價換算
-          let unitPrice: number | undefined = undefined;
-          const sizeMatch = row.innerText.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
-          if (sizeMatch && price > 0) {
-            const size = parseInt(sizeMatch[1]);
-            if (size > 0) unitPrice = Math.round((price / size) * 100) / 100;
-          }
-
-          return {
-            platform,
-            name,
-            spec: '',
-            price,
-            unit,
-            unitPrice,
-            stock,
-            link: window.location.href,
-            expiry,
-            nhiCode,
-            nhiPrice
-          };
-        });
+        await page.waitForSelector('tr', { timeout: 8000 })
+        await page.waitForTimeout(500)
       } catch (e) {
-        return [];
+        console.log(`[好鄰居] 第 ${pageCount} 頁無資料或載入超時`)
+        break
       }
-    }, this.platformName)
 
-    return results
+      const pageResults: ProductResult[] = await page.evaluate((platform) => {
+        try {
+          const rows = Array.from(document.querySelectorAll('tr')).filter(tr => {
+            return tr.innerText.includes('NT$') || /[A-Z0-9]{10}/.test(tr.innerText);
+          });
+
+          return rows.map((row) => {
+            const pTags = Array.from(row.querySelectorAll('p'));
+            const pTexts = pTags.map(p => p.innerText.trim());
+
+            const nhiCode = pTexts.find(t => /^[A-Z0-9]{10}$/.test(t)) || '';
+
+            const nhiPriceText = pTexts.find(t => t.includes('NT$') && t.length < 15) || '';
+            const nhiPrice = parseFloat(nhiPriceText.replace(/[^0-9.]/g, '')) || 0;
+
+            const nameParts = pTexts.filter(t =>
+              t.length > 5 &&
+              !/^[A-Z0-9]{10}$/.test(t) &&
+              !t.includes('NT$') &&
+              !t.includes('粒/盒')
+            );
+            const name = nameParts.join(' ') || '未知藥品';
+
+            const optionEl = row.querySelector('option');
+            const priceText = optionEl ? optionEl.innerText.trim() : (pTexts.find(t => t.includes('NT$') && t.length > 15) || '');
+            const price = parseFloat(priceText.match(/NT\$\s*([\d,.]+)/)?.[1]?.replace(/,/g, '') || '0');
+            const unit = priceText.split('/').pop()?.trim() || '單位';
+
+            const stockEl = row.querySelector('span.font-bold');
+            const stock = stockEl ? stockEl.innerText.trim() : '有貨';
+
+            const expiryMatch = row.innerText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+            const expiry = expiryMatch ? expiryMatch[1] : '';
+
+            let unitPrice: number | undefined = undefined;
+            const sizeMatch = row.innerText.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
+            if (sizeMatch && price > 0) {
+              const size = parseInt(sizeMatch[1]);
+              if (size > 0) unitPrice = Math.round((price / size) * 100) / 100;
+            }
+
+            return { platform, name, spec: '', price, unit, unitPrice, stock, link: window.location.href, expiry, nhiCode, nhiPrice };
+          });
+        } catch (e) {
+          return [];
+        }
+      }, this.platformName)
+
+      if (pageResults.length === 0) break
+      allResults.push(...pageResults)
+      console.log(`[好鄰居] 第 ${pageCount} 頁抓取完成，目前共 ${allResults.length} 筆`)
+
+      // 檢查是否有下一頁
+      const hasNextPage = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('div.justify-end span, span')).some(
+          s => (s as HTMLElement).innerText?.trim() === '下一頁'
+        )
+      })
+
+      if (!hasNextPage) {
+        console.log('[好鄰居] 已達最後一頁，停止翻頁')
+        break
+      }
+
+      // 點擊下一頁並等待內容更新
+      const firstRowText = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('tr')).filter(tr => tr.innerText.includes('NT$'))
+        return rows[0]?.innerText || ''
+      })
+
+      await page.evaluate(() => {
+        const nextBtn = Array.from(document.querySelectorAll('span')).find(
+          s => (s as HTMLElement).innerText?.trim() === '下一頁'
+        )
+        if (nextBtn) (nextBtn as HTMLElement).click()
+      })
+
+      try {
+        await page.waitForFunction((oldText) => {
+          const rows = Array.from(document.querySelectorAll('tr')).filter((tr: any) => tr.innerText.includes('NT$'))
+          return rows.length > 0 && rows[0].innerText !== oldText
+        }, firstRowText, { timeout: 8000 })
+      } catch (e) {
+        console.log('[好鄰居] 翻頁等待超時，停止')
+        break
+      }
+
+      pageCount++
+    }
+
+    console.log(`[好鄰居] 全部抓取完成，共 ${allResults.length} 筆`)
+    return allResults
   }
 }

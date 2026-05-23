@@ -49,8 +49,8 @@ export class ChahwaConnector extends Connector {
     }
     
     console.log('[嘉鏵] 正在輸入帳密 (擬人化)...')
-    await this.humanType(page, 'input[name="username"]', creds.username)
-    await this.humanType(page, 'input[name="password"]', creds.password)
+    await this.fastType(page, 'input[name="username"]', creds.username)
+    await this.fastType(page, 'input[name="password"]', creds.password)
     
     console.log('[Chahwa] Clicking login button...')
     await page.click('a#urlogin_a')
@@ -112,8 +112,6 @@ export class ChahwaConnector extends Connector {
     const MAX_PAGES = 50 // 安全限制
 
     try {
-      await performSearchStep()
-      
       while (pageCount <= MAX_PAGES) {
         console.log(`[嘉鏵] 正在抓取第 ${pageCount} 頁...`)
         

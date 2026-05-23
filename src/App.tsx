@@ -24,11 +24,9 @@ function App() {
         handleModeSelect(initMode as 'chrome' | 'python')
       })
       
-      // 同時檢查本地儲存
+      // 同時檢查本地儲存，預設 chrome 模式
       const savedMode = localStorage.getItem('app-mode') as 'chrome' | 'python' | null
-      if (savedMode) {
-        handleModeSelect(savedMode)
-      }
+      handleModeSelect(savedMode || 'chrome')
       
       return () => {
         if (typeof removeListener === 'function') removeListener()

@@ -16,6 +16,9 @@ scratch/
 # Build output
 release/
 
+# Playwright browsers (本地安裝，攜帶式用途)
+browsers/
+
 node_modules
 dist
 dist-ssr

@@ -15,8 +15,8 @@ export class BinLiConnector extends Connector {
 
   async login(page: Page, creds: any): Promise<boolean> {
     await page.goto(this.baseUrl)
-    await this.humanType(page, 'input[placeholder="請輸入帳號"]', creds.username)
-    await this.humanType(page, 'input[placeholder="請輸入密碼"]', creds.password)
+    await this.fastType(page, 'input[placeholder="請輸入帳號"]', creds.username)
+    await this.fastType(page, 'input[placeholder="請輸入密碼"]', creds.password)
     await page.click('button.ulogin.yellow')
     await page.waitForTimeout(4000)
     return await this.isLoggedIn(page)
@@ -38,8 +38,13 @@ export class BinLiConnector extends Connector {
     }
 
     // 2. 注入關鍵字並查詢
-    await page.fill(targetSelector, searchTerm)
-    await page.click('button.or_query')
+    try {
+      await this.fastType(page, targetSelector, searchTerm)
+      await page.click('button.or_query, button:has-text("查詢")')
+    } catch (e) {
+      console.error('[BinLi] 搜尋提交失敗:', e)
+      return []
+    }
 
     const allResults: ProductResult[] = []
     let pageCount = 1
@@ -66,18 +71,21 @@ export class BinLiConnector extends Connector {
           const nameH3 = nameEl.querySelector('h3');
           if (!nameH3) return;
           const name = nameH3.innerText.trim();
-          const nhiEl = row.querySelector('.nhi') as HTMLElement;
-          const nhiText = nhiEl?.innerText || '';
-          const nhiCodeMatch = nhiText.match(/[A-Z0-9]{10}/);
-          const nhiCode = nhiCodeMatch ? nhiCodeMatch[0] : '';
+          const nhiCodeEl = row.querySelector('.nhi-code') as HTMLElement;
+          const nhiCode = nhiCodeEl?.innerText.trim() || '';
+          const nhiPriceEl = row.querySelector('.nhi .red') as HTMLElement;
+          const nhiPrice = nhiPriceEl ? parseFloat(nhiPriceEl.innerText.replace(/[^0-9.]/g, '')) || 0 : 0;
           const priceEl = row.querySelector('.price') as HTMLElement;
-          const priceText = priceEl ? priceEl.innerText.replace(/[^0-9.]/g, '') : '0';
-          const price = parseFloat(priceText) || 0;
+          const price = priceEl ? parseFloat(priceEl.innerText.replace(/[^0-9.]/g, '')) || 0 : 0;
           const unitEl = row.querySelector('.unit') as HTMLElement;
           const unit = unitEl ? unitEl.innerText.replace(/[\/\s]/g, '').trim() : '單位';
+          const stockEl = row.querySelector('.stock') as HTMLElement;
+          const stockText = stockEl?.innerText.split('\n')[0].trim() || '有供貨';
+          const ingredientsEl = row.querySelector('.ingredients') as HTMLElement;
+          const spec = ingredientsEl?.innerText.trim() || '';
           if (name && name !== '品名(中英)') {
             products.push({
-              platform, name, spec: '', price, unit, stock: '有供貨', link: window.location.href, expiry: '', nhiCode, nhiPrice: 0
+              platform, name, spec, price, unit, stock: stockText, link: window.location.href, expiry: '', nhiCode, nhiPrice
             });
           }
         });

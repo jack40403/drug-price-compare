@@ -28,8 +28,8 @@ export class YCConnector extends Connector {
     
     await page.waitForSelector(userField, { timeout: 10000 })
     console.log('[益全] 正在填寫帳密...')
-    await this.humanType(page, userField, creds.username)
-    await this.humanType(page, passField, creds.password)
+    await this.fastType(page, userField, creds.username)
+    await this.fastType(page, passField, creds.password)
 
     console.log('[YC] Clicking login button...')
     await page.click('button#submit-btn')
@@ -115,9 +115,10 @@ export class YCConnector extends Connector {
         const priceText = priceEl ? priceEl.innerText.replace(/[^0-9.]/g, '') : '0';
         const price = parseFloat(priceText) || 0;
 
-        // 庫存 (.product_item_stock)
-        const stockEl = card.querySelector('.product_item_stock');
-        const stock = stockEl ? stockEl.innerText.trim() : '有供貨';
+        // 庫存 (.product_item_out_stock)
+        const stockEl = card.querySelector('.product_item_out_stock');
+        const stockQty = stockEl ? stockEl.innerText.trim() : '';
+        const stock = stockQty ? `庫存：${stockQty}` : '有供貨';
 
         // 單位 (從品名或文字找)
         const unitMatch = name.match(/\/ (盒|袋|瓶|支|組|排)/) || text.match(/(?:包裝|\/)\s*\d*\s*(盒|袋|瓶|支|組|排)/);

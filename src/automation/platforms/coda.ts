@@ -33,8 +33,8 @@ export class CodaConnector extends Connector {
     if (await this.isLoggedIn(page)) return true
 
     console.log('[可達] 正在輸入帳密 (擬人化)...')
-    await this.humanType(page, 'input#Account', creds.username)
-    await this.humanType(page, 'input#Password', creds.password)
+    await this.fastType(page, 'input#Account', creds.username)
+    await this.fastType(page, 'input#Password', creds.password)
     await page.click('input#Submit')
 
     // 等待跳轉，縮短超時時間並增加靈活性

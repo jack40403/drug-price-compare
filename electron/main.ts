@@ -874,7 +874,8 @@ function startHttpBridge() {
               result = { success: false, error: 'Captcha request not found' };
             }
           } else if (channel === 'search-nhi-local') {
-            result = await searchNhiLocal(args[0]);
+            const { searchTerm: nhiTerm, filters: nhiFilters } = args[0] || {};
+            result = await searchNhiLocal(nhiTerm, nhiFilters);
           } else if (channel === 'get-drug-appearance') {
             result = await getDrugAppearance(args[0].license, args[0].name, args[0].nhiCode);
           } else if (channel === 'ping') {

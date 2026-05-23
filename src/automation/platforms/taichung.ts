@@ -25,8 +25,8 @@ export class TaichungConnector extends Connector {
     await page.waitForTimeout(1000)
 
     console.log('[泰昌] 正在輸入帳密 (擬人化)...')
-    await this.humanType(page, "input[placeholder='請輸入登入帳號']", creds.username)
-    await this.humanType(page, "input[placeholder='請輸入登入密碼']", creds.password)
+    await this.fastType(page, "input[placeholder='請輸入登入帳號']", creds.username)
+    await this.fastType(page, "input[placeholder='請輸入登入密碼']", creds.password)
 
     console.log('[Taichung] Clicking login button...')
     await page.click('a#ulogin_submit')
@@ -44,9 +44,10 @@ export class TaichungConnector extends Connector {
     console.log(`[泰昌] 正準備搜尋: "${searchTerm}", Filters: ${JSON.stringify(filters)}`)
     // 根據手動勾選決定欄位
     const isCode = filters?.code === true;
+    const isComponent = filters?.component === true;
     const targetUrl = 'https://taichung-pc.com.tw/order.php?act=order'
-    const targetSelector = isCode ? 'input[name="hid"]' : 'input[name="drug"]'
-    const fieldName = isCode ? '健保碼' : '品名'
+    const targetSelector = isCode ? 'input[name="hid"]' : isComponent ? 'input[name="emt_drug"]' : 'input[name="drug"]'
+    const fieldName = isCode ? '健保碼' : isComponent ? '成分' : '品名'
 
     console.log(`[泰昌] ===============================`)
     console.log(`[泰昌] 判定結果: ${fieldName}`)

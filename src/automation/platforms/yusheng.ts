@@ -56,8 +56,8 @@ export class YuShengConnector extends Connector {
       await accountInput.waitFor({ state: 'visible', timeout: 5000 })
       
       console.log('[宇盛] 正在擬人化輸入帳密...')
-      await this.humanType(page, 'input[name="account"]', creds.username)
-      await this.humanType(page, 'input[name="pwd"]', creds.password)
+      await this.fastType(page, 'input[name="account"]', creds.username)
+      await this.fastType(page, 'input[name="pwd"]', creds.password)
       
       // 5. 點擊登入提交
       await page.click('#ulogin_submit2', { force: true })
@@ -87,74 +87,91 @@ export class YuShengConnector extends Connector {
       return []
     }
 
-    const results: ProductResult[] = await page.evaluate((platform) => {
+    const allResults: ProductResult[] = []
+    let pageCount = 1
+    const MAX_PAGES = 50
+
+    while (pageCount <= MAX_PAGES) {
       try {
-        // 1. 鎖定真正的產品大行 (d-lg-block 且包含健保碼)
-        const rows = Array.from(document.querySelectorAll('li.d-lg-block')).filter(row => {
-          return row.querySelector('a.text-info') !== null && !row.innerText.includes('產品圖');
-        });
-
-        if (rows.length === 0) return [];
-
-        return rows.map((row) => {
-          const rowText = (row as HTMLElement).innerText;
-
-          // 品名 (.fw-bolder)
-          const nameEl = row.querySelector('.fw-bolder');
-          const name = nameEl ? nameEl.innerText.trim() : '未知藥品';
-
-          // 健保碼 (a.text-info)
-          const nhiEl = row.querySelector('a.text-info');
-          const nhiCode = nhiEl ? nhiEl.innerText.trim() : '';
-
-          // 健保價 (改用正則尋找文字 "健保價： 14.80")
-          const nhiPriceMatch = rowText.match(/健保價\s*[:：]\s*([\d,.]+)/);
-          const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, '')) : 0;
-
-          // 售價 (span.fs-5)
-          const priceEl = row.querySelector('span.fs-5');
-          const price = priceEl ? parseFloat(priceEl.innerText.replace(/[^0-9.]/g, '')) : 0;
-
-          // 單位
-          const priceAreaText = priceEl?.parentElement?.innerText || '';
-          const unitMatch = priceAreaText.match(/\/\s*([^\n\s：:]+)/);
-          const unit = unitMatch ? unitMatch[1].trim() : '單位';
-
-          // 庫存
-          const isOutOfStock = row.querySelector('.text-outofstock') !== null;
-          const stock = isOutOfStock ? '缺貨中' : '有供貨';
-
-          // 有效期限
-          const expiryMatch = rowText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
-          const expiry = expiryMatch ? expiryMatch[1] : '';
-
-          // 單價換算
-          let unitPrice: number | undefined = undefined;
-          const sizeMatch = name.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
-          if (sizeMatch && price > 0) {
-            const size = parseInt(sizeMatch[1]);
-            if (size > 0) unitPrice = Math.round((price / size) * 100) / 100;
-          }
-
-          return {
-            platform,
-            name,
-            spec: '',
-            price,
-            unit,
-            unitPrice,
-            stock,
-            link: window.location.href,
-            expiry,
-            nhiCode,
-            nhiPrice
-          };
-        });
+        await page.waitForSelector('li.d-lg-block', { timeout: 8000 })
+        await page.waitForTimeout(500)
       } catch (e) {
-        return [];
+        console.log(`[宇盛] 第 ${pageCount} 頁無資料或載入超時`)
+        break
       }
-    }, this.platformName)
 
-    return results
+      const pageResults: ProductResult[] = await page.evaluate((platform) => {
+        try {
+          const rows = Array.from(document.querySelectorAll('li.d-lg-block')).filter(row => {
+            return row.querySelector('a.text-info') !== null && !row.innerText.includes('產品圖');
+          });
+
+          if (rows.length === 0) return [];
+
+          return rows.map((row) => {
+            const rowText = (row as HTMLElement).innerText;
+
+            const nameEl = row.querySelector('.fw-bolder');
+            const name = nameEl ? nameEl.innerText.trim() : '未知藥品';
+
+            const nhiEl = row.querySelector('a.text-info');
+            const nhiCode = nhiEl ? nhiEl.innerText.trim() : '';
+
+            const nhiPriceMatch = rowText.match(/健保價\s*[:：]\s*([\d,.]+)/);
+            const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, '')) : 0;
+
+            const priceEl = row.querySelector('span.fs-5');
+            const price = priceEl ? parseFloat(priceEl.innerText.replace(/[^0-9.]/g, '')) : 0;
+
+            const priceAreaText = priceEl?.parentElement?.innerText || '';
+            const unitMatch = priceAreaText.match(/\/\s*([^\n\s：:]+)/);
+            const unit = unitMatch ? unitMatch[1].trim() : '單位';
+
+            const isOutOfStock = row.querySelector('.text-outofstock') !== null;
+            const stock = isOutOfStock ? '缺貨中' : '有供貨';
+
+            const expiryMatch = rowText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+            const expiry = expiryMatch ? expiryMatch[1] : '';
+
+            let unitPrice: number | undefined = undefined;
+            const sizeMatch = name.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
+            if (sizeMatch && price > 0) {
+              const size = parseInt(sizeMatch[1]);
+              if (size > 0) unitPrice = Math.round((price / size) * 100) / 100;
+            }
+
+            return { platform, name, spec: '', price, unit, unitPrice, stock, link: window.location.href, expiry, nhiCode, nhiPrice };
+          });
+        } catch (e) {
+          return [];
+        }
+      }, this.platformName)
+
+      if (pageResults.length === 0) break
+      allResults.push(...pageResults)
+      console.log(`[宇盛] 第 ${pageCount} 頁抓取完成，目前共 ${allResults.length} 筆`)
+
+      const nextBtn = await page.$('a.page-link[aria-label="Next"]')
+      if (!nextBtn) {
+        console.log('[宇盛] 已達最後一頁，停止翻頁')
+        break
+      }
+
+      await nextBtn.click()
+
+      try {
+        await page.waitForFunction((oldPage) => {
+          const activeEl = document.querySelector('li.page-item.active a.page-link')
+          return activeEl ? parseInt(activeEl.textContent || '0') > oldPage : false
+        }, pageCount, { timeout: 8000 })
+        pageCount++
+      } catch (e) {
+        console.log('[宇盛] 翻頁等待超時，停止')
+        break
+      }
+    }
+
+    console.log(`[宇盛] 全部抓取完成，共 ${allResults.length} 筆`)
+    return allResults
   }
 }

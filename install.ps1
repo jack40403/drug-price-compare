@@ -1,17 +1,18 @@
 # ============================================================
-#  藥品比價小精靈 V2 - 一鍵環境安裝腳本
-#  使用方式：雙擊 install.bat，或右鍵 install.ps1 → 以 PowerShell 執行
+#  藥品比價小精靈 - 一鍵環境安裝腳本
+#  使用方式：雙擊 install.bat
 # ============================================================
 
 $Host.UI.RawUI.WindowTitle = "藥品比價小精靈 - 一鍵安裝"
-$ProjectDir = $PSScriptRoot
+$ProjectDir  = $PSScriptRoot
 $NODE_VERSION = "22.11.0"
 $NODE_URL     = "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-x64.msi"
+$BrowsersDir  = Join-Path $ProjectDir "browsers"
 
 function Write-Banner {
     Write-Host ""
     Write-Host "==========================================" -ForegroundColor DarkCyan
-    Write-Host "   藥品比價小精靈 V2  -  一鍵安裝程式" -ForegroundColor Cyan
+    Write-Host "   藥品比價小精靈  -  一鍵安裝程式" -ForegroundColor Cyan
     Write-Host "==========================================" -ForegroundColor DarkCyan
     Write-Host ""
 }
@@ -25,16 +26,13 @@ function Write-OK([string]$msg)   { Write-Host "        OK  $msg" -ForegroundCol
 function Write-WARN([string]$msg) { Write-Host "      WARN  $msg" -ForegroundColor DarkYellow }
 function Write-ERR([string]$msg)  { Write-Host "     ERROR  $msg" -ForegroundColor Red }
 
-# ── 更新環境變數（安裝後立即生效，不需重開機）──────────────────
 function Refresh-Path {
     $machinePath = [System.Environment]::GetEnvironmentVariable("Path","Machine")
     $userPath    = [System.Environment]::GetEnvironmentVariable("Path","User")
     $env:Path    = "$machinePath;$userPath"
 }
 
-# ────────────────────────────────────────────────────────────
 Write-Banner
-
 Set-Location $ProjectDir
 
 # ════════════════════════════════════════════════
@@ -79,7 +77,6 @@ if ($needInstallNode) {
         }
     } catch {
         Write-ERR "下載/安裝 Node.js 失敗：$($_.Exception.Message)"
-        Write-Host ""
         Write-Host "  請手動安裝 Node.js：https://nodejs.org/" -ForegroundColor Yellow
         Read-Host "  按 Enter 結束"
         exit 1
@@ -93,7 +90,7 @@ Write-Step 2 4 "安裝 npm 套件（首次約需 1～3 分鐘）..."
 
 $npmOut = & npm install 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-ERR "npm install 失敗，錯誤訊息如下："
+    Write-ERR "npm install 失敗："
     Write-Host $npmOut -ForegroundColor DarkRed
     Read-Host "  按 Enter 結束"
     exit 1
@@ -101,17 +98,34 @@ if ($LASTEXITCODE -ne 0) {
 Write-OK "npm 套件安裝完成"
 
 # ════════════════════════════════════════════════
-#  STEP 3 : Playwright Chromium
+#  STEP 3 : Playwright Chromium (安裝至專案內部)
+#  設定 PLAYWRIGHT_BROWSERS_PATH 讓瀏覽器存在
+#  專案資料夾內，複製到隨身碟也能直接使用
 # ════════════════════════════════════════════════
-Write-Step 3 4 "安裝 Playwright Chromium 瀏覽器..."
+Write-Step 3 4 "安裝 Playwright Chromium 瀏覽器（存至專案內 browsers\ 資料夾）..."
 
-$pwOut = & npx playwright install chromium 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-WARN "Chromium 安裝失敗（以下為詳情）"
-    Write-Host ($pwOut | Out-String) -ForegroundColor DarkYellow
-    Write-WARN "自動化比價功能可能受影響；其他功能（健保查詢等）仍可正常使用"
-} else {
-    Write-OK "Chromium 安裝完成"
+$env:PLAYWRIGHT_BROWSERS_PATH = $BrowsersDir
+
+# 檢查是否已安裝
+$alreadyInstalled = $false
+if (Test-Path $BrowsersDir) {
+    $chromiumFolders = Get-ChildItem $BrowsersDir -Directory -Filter "chromium-*" -ErrorAction SilentlyContinue
+    if ($chromiumFolders.Count -gt 0) {
+        $alreadyInstalled = $true
+        Write-OK "Chromium 已安裝於 browsers\ 資料夾，跳過下載"
+    }
+}
+
+if (-not $alreadyInstalled) {
+    Write-Host "        正在下載 Chromium（約 200MB，請耐心等候）..." -ForegroundColor Cyan
+    $pwOut = & npx playwright install chromium 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-WARN "Chromium 安裝失敗"
+        Write-Host ($pwOut | Out-String) -ForegroundColor DarkYellow
+        Write-WARN "自動化比價功能可能受影響"
+    } else {
+        Write-OK "Chromium 安裝完成（位於 browsers\ 資料夾）"
+    }
 }
 
 # ════════════════════════════════════════════════
@@ -122,22 +136,19 @@ Write-Step 4 4 "建立桌面捷徑..."
 $WshShell    = New-Object -ComObject WScript.Shell
 $Desktop     = [Environment]::GetFolderPath('Desktop')
 $VbsLauncher = Join-Path $ProjectDir "scripts\run_app_silent.vbs"
+$IconPath    = Join-Path $ProjectDir "public\icon.ico"
 
-# 主捷徑（靜默 VBS 啟動器）
 if (Test-Path $VbsLauncher) {
     $lnk = $WshShell.CreateShortcut((Join-Path $Desktop "藥品比價小精靈.lnk"))
-    $lnk.TargetPath      = "wscript.exe"
-    $lnk.Arguments       = "`"$VbsLauncher`""
+    $lnk.TargetPath       = "wscript.exe"
+    $lnk.Arguments        = "`"$VbsLauncher`""
     $lnk.WorkingDirectory = $ProjectDir
-    $lnk.WindowStyle     = 7
+    $lnk.WindowStyle      = 7
+    if (Test-Path $IconPath) { $lnk.IconLocation = $IconPath }
     $lnk.Save()
     Write-OK "桌面捷徑「藥品比價小精靈」已建立"
-}
-
-# 其他捷徑（如已有 final_execution_shortcut.ps1）
-$finalScript = Join-Path $ProjectDir "scripts\final_execution_shortcut.ps1"
-if (Test-Path $finalScript) {
-    & powershell -ExecutionPolicy Bypass -File $finalScript 2>$null
+} else {
+    Write-WARN "找不到 $VbsLauncher，跳過捷徑建立"
 }
 
 # ════════════════════════════════════════════════
@@ -148,9 +159,8 @@ Write-Host "  ==========================================" -ForegroundColor DarkC
 Write-Host "   安裝完成！" -ForegroundColor Green
 Write-Host "  ==========================================" -ForegroundColor DarkCyan
 Write-Host ""
-Write-Host "  啟動方式：" -ForegroundColor White
-Write-Host "    雙擊桌面上的「藥品比價小精靈」捷徑" -ForegroundColor Gray
-Write-Host "    或直接執行：$VbsLauncher" -ForegroundColor Gray
+Write-Host "  啟動方式：雙擊桌面上的「藥品比價小精靈」捷徑" -ForegroundColor Gray
+Write-Host "  攜帶使用：將整個資料夾（含 node_modules\ 與 browsers\）複製到隨身碟" -ForegroundColor Gray
 Write-Host ""
 
 $ans = Read-Host "  立即啟動程式？(Y/N)"

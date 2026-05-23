@@ -32,7 +32,7 @@ const Dashboard = () => {
   const [selectedAppearance, setSelectedAppearance] = useState<any>(null)
   const [isAppearanceLoading, setIsAppearanceLoading] = useState(false)
   const [indexingStatus, setIndexingStatus] = useState<any>(null) // 獨立的建索引狀態
-  const [isStrictFilter, setIsStrictFilter] = useState(true) // 精確過濾開關 (預設開啟)
+  const [isStrictFilter, setIsStrictFilter] = useState(false) // 精確過濾開關 (預設關閉，避免過濾掉含 /PTP /Tab 等劑型的藥品名稱)
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' | null }>({ key: '', direction: null }) // 排序設定
   const [captchaQueue, setCaptchaQueue] = useState<any[]>([])
   const [captchaInputs, setCaptchaInputs] = useState<Record<string, string>>({})
@@ -971,8 +971,22 @@ const Dashboard = () => {
                 let isMatch = basicMatch;
                 if (isStrictFilter && term && basicMatch) {
                   const isSearchCompound = term.includes('/') || term.includes('+');
-                  const isProductCompound = (p.name + p.spec).includes('/') || (p.name + p.spec).includes('+');
-                  
+
+                  // 改良複方判定：排除劑型縮寫 (如 /PTP, /Tab, /CAP, /mL)
+                  // 只有當 "/" 後方包含中文字，或英文長度 > 5 時，才視為複方
+                  const isCompound = (str: string): boolean => {
+                    if (str.includes('+')) return true;
+                    if (!str.includes('/')) return false;
+                    return str.split('/').slice(1).some(part => {
+                      const clean = part.trim();
+                      if (/[一-龥]/.test(clean)) return true; // 有中文 = 藥名
+                      const alpha = clean.replace(/[^a-zA-Z]/g, '');
+                      return alpha.length > 5; // 英文長度 > 5 = 藥名而非縮寫
+                    });
+                  };
+
+                  const isProductCompound = isCompound((p.name || '') + (p.spec || ''));
+
                   // 如果搜尋的是單方 (沒斜線)，但產品是複方 (有斜線)，則隱藏
                   if (!isSearchCompound && isProductCompound) {
                     isMatch = false;

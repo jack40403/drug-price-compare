@@ -130,8 +130,8 @@ class BinLiConnector extends Connector {
   }
   async login(page, creds) {
     await page.goto(this.baseUrl);
-    await this.humanType(page, 'input[placeholder="請輸入帳號"]', creds.username);
-    await this.humanType(page, 'input[placeholder="請輸入密碼"]', creds.password);
+    await this.fastType(page, 'input[placeholder="請輸入帳號"]', creds.username);
+    await this.fastType(page, 'input[placeholder="請輸入密碼"]', creds.password);
     await page.click("button.ulogin.yellow");
     await page.waitForTimeout(4e3);
     return await this.isLoggedIn(page);
@@ -147,8 +147,13 @@ class BinLiConnector extends Connector {
     } else if (filters == null ? void 0 : filters.component) {
       targetSelector = 'input[placeholder*="3個字"]';
     }
-    await page.fill(targetSelector, searchTerm);
-    await page.click("button.or_query");
+    try {
+      await this.fastType(page, targetSelector, searchTerm);
+      await page.click('button.or_query, button:has-text("查詢")');
+    } catch (e) {
+      console.error("[BinLi] 搜尋提交失敗:", e);
+      return [];
+    }
     const allResults = [];
     let pageCount = 1;
     const MAX_PAGES = 100;
@@ -169,27 +174,30 @@ class BinLiConnector extends Connector {
           const nameH3 = nameEl.querySelector("h3");
           if (!nameH3) return;
           const name = nameH3.innerText.trim();
-          const nhiEl = row.querySelector(".nhi");
-          const nhiText = (nhiEl == null ? void 0 : nhiEl.innerText) || "";
-          const nhiCodeMatch = nhiText.match(/[A-Z0-9]{10}/);
-          const nhiCode = nhiCodeMatch ? nhiCodeMatch[0] : "";
+          const nhiCodeEl = row.querySelector(".nhi-code");
+          const nhiCode = (nhiCodeEl == null ? void 0 : nhiCodeEl.innerText.trim()) || "";
+          const nhiPriceEl = row.querySelector(".nhi .red");
+          const nhiPrice = nhiPriceEl ? parseFloat(nhiPriceEl.innerText.replace(/[^0-9.]/g, "")) || 0 : 0;
           const priceEl = row.querySelector(".price");
-          const priceText = priceEl ? priceEl.innerText.replace(/[^0-9.]/g, "") : "0";
-          const price = parseFloat(priceText) || 0;
+          const price = priceEl ? parseFloat(priceEl.innerText.replace(/[^0-9.]/g, "")) || 0 : 0;
           const unitEl = row.querySelector(".unit");
           const unit = unitEl ? unitEl.innerText.replace(/[\/\s]/g, "").trim() : "單位";
+          const stockEl = row.querySelector(".stock");
+          const stockText = (stockEl == null ? void 0 : stockEl.innerText.split("\n")[0].trim()) || "有供貨";
+          const ingredientsEl = row.querySelector(".ingredients");
+          const spec = (ingredientsEl == null ? void 0 : ingredientsEl.innerText.trim()) || "";
           if (name && name !== "品名(中英)") {
             products.push({
               platform,
               name,
-              spec: "",
+              spec,
               price,
               unit,
-              stock: "有供貨",
+              stock: stockText,
               link: window.location.href,
               expiry: "",
               nhiCode,
-              nhiPrice: 0
+              nhiPrice
             });
           }
         });
@@ -268,8 +276,8 @@ class ChahwaConnector extends Connector {
       console.warn("[Chahwa] Login trigger not found, maybe already visible?");
     }
     console.log("[嘉鏵] 正在輸入帳密 (擬人化)...");
-    await this.humanType(page, 'input[name="username"]', creds.username);
-    await this.humanType(page, 'input[name="password"]', creds.password);
+    await this.fastType(page, 'input[name="username"]', creds.username);
+    await this.fastType(page, 'input[name="password"]', creds.password);
     console.log("[Chahwa] Clicking login button...");
     await page.click("a#urlogin_a");
     await page.waitForTimeout(4e3);
@@ -317,7 +325,6 @@ class ChahwaConnector extends Connector {
     let pageCount = 1;
     const MAX_PAGES = 50;
     try {
-      await performSearchStep();
       while (pageCount <= MAX_PAGES) {
         console.log(`[嘉鏵] 正在抓取第 ${pageCount} 頁...`);
         const pageResults = await page.evaluate((platform) => {
@@ -422,8 +429,8 @@ class JhaoHongConnector extends Connector {
       await page.waitForTimeout(1500);
     }
     console.log("[兆宏] 正在輸入帳密 (擬人化)...");
-    await this.humanType(page, 'input[placeholder*="帳號"]', creds.username);
-    await this.humanType(page, 'input[placeholder*="密碼"]', creds.password);
+    await this.fastType(page, 'input[placeholder*="帳號"]', creds.username);
+    await this.fastType(page, 'input[placeholder*="密碼"]', creds.password);
     console.log("[JhaoHong] 提交登入選項...");
     await page.click("button.login");
     await page.waitForTimeout(1500);
@@ -503,7 +510,7 @@ class JhaoHongConnector extends Connector {
         const t = document.body.innerText;
         return t.includes("健保") || t.includes("產品列表") || t.includes("搜尋結果");
       }, { timeout: 12e3 });
-      await page.waitForTimeout(2e3);
+      await page.waitForTimeout(1500);
     } catch (e) {
       return [{
         platform: this.platformName,
@@ -515,56 +522,79 @@ class JhaoHongConnector extends Connector {
         link: page.url()
       }];
     }
-    const results = await page.evaluate((platform) => {
+    const allResults = [];
+    let pageCount = 1;
+    const MAX_PAGES = 50;
+    while (pageCount <= MAX_PAGES) {
       try {
-        const cards = Array.from(document.querySelectorAll("li.item, .item"));
-        if (cards.length === 0) return [];
-        return cards.map((card) => {
-          const nameEl = card.querySelector("h3");
-          const name = nameEl ? nameEl.innerText.trim() : "未知藥品";
-          const codeEl = card.querySelector(".code.above, .code");
-          const nhiCode = codeEl ? codeEl.innerText.trim() : "";
-          const nhiPriceEl = card.querySelector(".red");
-          const nhiPriceText = nhiPriceEl ? nhiPriceEl.innerText.replace(/[^0-9.]/g, "") : "0";
-          const nhiPrice = parseFloat(nhiPriceText) || 0;
-          const validityEl = card.querySelector(".validity");
-          const expiry = validityEl ? validityEl.innerText.replace(/效期\s*[:：]\s*/, "").trim() : "";
-          const priceEl = card.querySelector(".p");
-          const priceText = priceEl ? priceEl.innerText.replace(/[^0-9.]/g, "") : "0";
-          const price = parseFloat(priceText) || 0;
-          const unitEl = card.querySelector(".u");
-          const unit = unitEl ? unitEl.innerText.replace(/\//, "").trim() : "單位";
-          const stockEl = card.querySelector(".s");
-          const stockText = stockEl ? stockEl.innerText.trim() : "";
-          const isOutOfStock = stockText.includes("缺貨") || stockText.includes("售完") || card.classList.contains("out");
-          const stockStatus = isOutOfStock ? "缺貨中" : stockText || "有供貨";
-          let unitPrice = void 0;
-          const sizeMatch = name.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入)/i);
-          if (sizeMatch && price > 0) {
-            const size = parseInt(sizeMatch[1]);
-            if (size > 0) {
-              unitPrice = Math.round(price / size * 100) / 100;
-            }
-          }
-          return {
-            platform,
-            name,
-            spec: "",
-            price,
-            unit,
-            unitPrice,
-            stock: stockStatus,
-            link: window.location.href,
-            expiry,
-            nhiCode,
-            nhiPrice
-          };
-        });
-      } catch (err) {
-        return [];
+        await page.waitForSelector("li.item", { timeout: 8e3 });
+        await page.waitForTimeout(500);
+      } catch (e) {
+        console.log(`[兆宇] 第 ${pageCount} 頁無資料或載入超時`);
+        break;
       }
-    }, this.platformName);
-    return results;
+      const pageResults = await page.evaluate((platform) => {
+        try {
+          const cards = Array.from(document.querySelectorAll("li.item"));
+          if (cards.length === 0) return [];
+          return cards.map((card) => {
+            const nameEl = card.querySelector("h3");
+            const name = nameEl ? nameEl.innerText.trim() : "未知藥品";
+            const codeEl = card.querySelector(".code.above, .code");
+            const nhiCode = codeEl ? codeEl.innerText.trim() : "";
+            const nhiPriceEl = card.querySelector(".red");
+            const nhiPrice = parseFloat(nhiPriceEl ? nhiPriceEl.innerText.replace(/[^0-9.]/g, "") : "0") || 0;
+            const validityEl = card.querySelector(".validity");
+            const expiry = validityEl ? validityEl.innerText.replace(/效期\s*[:：]\s*/, "").trim() : "";
+            const priceEl = card.querySelector(".p");
+            const price = parseFloat(priceEl ? priceEl.innerText.replace(/[^0-9.]/g, "") : "0") || 0;
+            const unitEl = card.querySelector(".u");
+            const unit = unitEl ? unitEl.innerText.replace(/\//, "").trim() : "單位";
+            const stockEl = card.querySelector(".s");
+            const stockText = stockEl ? stockEl.innerText.trim() : "";
+            const stockStatus = stockText.includes("缺貨") || stockText.includes("售完") || card.classList.contains("out") ? "缺貨中" : stockText || "有供貨";
+            let unitPrice = void 0;
+            const sizeMatch = name.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入)/i);
+            if (sizeMatch && price > 0) {
+              const size = parseInt(sizeMatch[1]);
+              if (size > 0) unitPrice = Math.round(price / size * 100) / 100;
+            }
+            return { platform, name, spec: "", price, unit, unitPrice, stock: stockStatus, link: window.location.href, expiry, nhiCode, nhiPrice };
+          });
+        } catch (err) {
+          return [];
+        }
+      }, this.platformName);
+      if (pageResults.length === 0) break;
+      allResults.push(...pageResults);
+      console.log(`[兆宇] 第 ${pageCount} 頁抓取完成，目前共 ${allResults.length} 筆`);
+      const isLastPage = await page.evaluate(() => {
+        var _a;
+        return ((_a = document.querySelector("li.r-arrow")) == null ? void 0 : _a.classList.contains("dis")) || false;
+      });
+      if (isLastPage) {
+        console.log("[兆宇] 已達最後一頁，停止翻頁");
+        break;
+      }
+      const nextBtn = await page.$("li.r-arrow button.next");
+      if (!nextBtn) {
+        console.log("[兆宇] 找不到下一頁按鈕，停止");
+        break;
+      }
+      await nextBtn.click();
+      try {
+        await page.waitForFunction((oldPage) => {
+          const input = document.querySelector('input[name="page"]');
+          return input ? parseInt(input.value) > oldPage : false;
+        }, pageCount, { timeout: 8e3 });
+        pageCount++;
+      } catch (e) {
+        console.log("[兆宇] 翻頁等待超時，停止");
+        break;
+      }
+    }
+    console.log(`[兆宇] 全部抓取完成，共 ${allResults.length} 筆`);
+    return allResults;
   }
 }
 class YesChainConnector extends Connector {
@@ -600,8 +630,8 @@ class YesChainConnector extends Connector {
       }
       console.log("[好鄰居] 正在填入帳號密碼 (精確定位可見欄位)...");
       await emailInput.waitFor({ state: "visible", timeout: 8e3 });
-      await this.humanType(page, "input#email >> visible=true", creds.username);
-      await this.humanType(page, "input#password >> visible=true", creds.password);
+      await this.fastType(page, "input#email >> visible=true", creds.username);
+      await this.fastType(page, "input#password >> visible=true", creds.password);
       const rcode = page.locator("input#rcode").filter({ visible: true }).first();
       if (await rcode.isVisible()) {
         console.log("[好鄰居] 偵測到驗證碼，正在截圖並請求遠端輸入...");
@@ -649,9 +679,14 @@ class YesChainConnector extends Connector {
     try {
       console.log("[好鄰居] 正在強制跳轉至產品搜尋頁面...");
       await page.goto("https://www.yeschain.com.tw/b2bStoreCart/prod", { waitUntil: "networkidle" });
-      const searchInput = 'input[placeholder*="品名"]';
+      let searchInput = 'input[placeholder*="品名"]';
+      if ((filters == null ? void 0 : filters.code) === true) {
+        searchInput = 'input[placeholder*="健保碼"]';
+      } else if ((filters == null ? void 0 : filters.component) === true) {
+        searchInput = 'input[placeholder*="成分"]';
+      }
       await page.waitForSelector(searchInput, { state: "visible", timeout: 1e4 });
-      console.log(`[好鄰居] 執行搜尋: "${searchTerm}"`);
+      console.log(`[好鄰居] 執行搜尋: "${searchTerm}" → ${searchInput}`);
       await this.fastType(page, searchInput, searchTerm);
       const submitBtn = page.locator("button").filter({ hasText: /^\s*查詢\s*$/ }).last();
       console.log("[好鄰居] 正在定位並點擊查詢按鈕...");
@@ -663,55 +698,95 @@ class YesChainConnector extends Connector {
       console.log("[好鄰居] 搜尋動作失敗:", e);
       return [];
     }
-    const results = await page.evaluate((platform) => {
+    const allResults = [];
+    let pageCount = 1;
+    const MAX_PAGES = 50;
+    while (pageCount <= MAX_PAGES) {
       try {
-        const rows = Array.from(document.querySelectorAll("tr")).filter((tr) => {
-          return tr.innerText.includes("NT$") || /[A-Z0-9]{10}/.test(tr.innerText);
-        });
-        return rows.map((row) => {
-          var _a, _b, _c;
-          const pTags = Array.from(row.querySelectorAll("p"));
-          const pTexts = pTags.map((p) => p.innerText.trim());
-          const nhiCode = pTexts.find((t) => /^[A-Z0-9]{10}$/.test(t)) || "";
-          const nhiPriceText = pTexts.find((t) => t.includes("NT$") && t.length < 15) || "";
-          const nhiPrice = parseFloat(nhiPriceText.replace(/[^0-9.]/g, "")) || 0;
-          const nameParts = pTexts.filter(
-            (t) => t.length > 5 && !/^[A-Z0-9]{10}$/.test(t) && !t.includes("NT$") && !t.includes("粒/盒")
-          );
-          const name = nameParts.join(" ") || "未知藥品";
-          const optionEl = row.querySelector("option");
-          const priceText = optionEl ? optionEl.innerText.trim() : pTexts.find((t) => t.includes("NT$") && t.length > 15) || "";
-          const price = parseFloat(((_b = (_a = priceText.match(/NT\$\s*([\d,.]+)/)) == null ? void 0 : _a[1]) == null ? void 0 : _b.replace(/,/g, "")) || "0");
-          const unit = ((_c = priceText.split("/").pop()) == null ? void 0 : _c.trim()) || "單位";
-          const stockEl = row.querySelector("span.font-bold");
-          const stock = stockEl ? stockEl.innerText.trim() : "有貨";
-          const expiryMatch = row.innerText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
-          const expiry = expiryMatch ? expiryMatch[1] : "";
-          let unitPrice = void 0;
-          const sizeMatch = row.innerText.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
-          if (sizeMatch && price > 0) {
-            const size = parseInt(sizeMatch[1]);
-            if (size > 0) unitPrice = Math.round(price / size * 100) / 100;
-          }
-          return {
-            platform,
-            name,
-            spec: "",
-            price,
-            unit,
-            unitPrice,
-            stock,
-            link: window.location.href,
-            expiry,
-            nhiCode,
-            nhiPrice
-          };
-        });
+        await page.waitForSelector("tr", { timeout: 8e3 });
+        await page.waitForTimeout(500);
       } catch (e) {
-        return [];
+        console.log(`[好鄰居] 第 ${pageCount} 頁無資料或載入超時`);
+        break;
       }
-    }, this.platformName);
-    return results;
+      const pageResults = await page.evaluate((platform) => {
+        try {
+          const rows = Array.from(document.querySelectorAll("tr")).filter((tr) => {
+            return tr.innerText.includes("NT$") || /[A-Z0-9]{10}/.test(tr.innerText);
+          });
+          return rows.map((row) => {
+            var _a, _b, _c;
+            const pTags = Array.from(row.querySelectorAll("p"));
+            const pTexts = pTags.map((p) => p.innerText.trim());
+            const nhiCode = pTexts.find((t) => /^[A-Z0-9]{10}$/.test(t)) || "";
+            const nhiPriceText = pTexts.find((t) => t.includes("NT$") && t.length < 15) || "";
+            const nhiPrice = parseFloat(nhiPriceText.replace(/[^0-9.]/g, "")) || 0;
+            const nameParts = pTexts.filter(
+              (t) => t.length > 5 && !/^[A-Z0-9]{10}$/.test(t) && !t.includes("NT$") && !t.includes("粒/盒")
+            );
+            const name = nameParts.join(" ") || "未知藥品";
+            const optionEl = row.querySelector("option");
+            const priceText = optionEl ? optionEl.innerText.trim() : pTexts.find((t) => t.includes("NT$") && t.length > 15) || "";
+            const price = parseFloat(((_b = (_a = priceText.match(/NT\$\s*([\d,.]+)/)) == null ? void 0 : _a[1]) == null ? void 0 : _b.replace(/,/g, "")) || "0");
+            const unit = ((_c = priceText.split("/").pop()) == null ? void 0 : _c.trim()) || "單位";
+            const stockEl = row.querySelector("span.font-bold");
+            const stock = stockEl ? stockEl.innerText.trim() : "有貨";
+            const expiryMatch = row.innerText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+            const expiry = expiryMatch ? expiryMatch[1] : "";
+            let unitPrice = void 0;
+            const sizeMatch = row.innerText.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
+            if (sizeMatch && price > 0) {
+              const size = parseInt(sizeMatch[1]);
+              if (size > 0) unitPrice = Math.round(price / size * 100) / 100;
+            }
+            return { platform, name, spec: "", price, unit, unitPrice, stock, link: window.location.href, expiry, nhiCode, nhiPrice };
+          });
+        } catch (e) {
+          return [];
+        }
+      }, this.platformName);
+      if (pageResults.length === 0) break;
+      allResults.push(...pageResults);
+      console.log(`[好鄰居] 第 ${pageCount} 頁抓取完成，目前共 ${allResults.length} 筆`);
+      const hasNextPage = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll("div.justify-end span, span")).some(
+          (s) => {
+            var _a;
+            return ((_a = s.innerText) == null ? void 0 : _a.trim()) === "下一頁";
+          }
+        );
+      });
+      if (!hasNextPage) {
+        console.log("[好鄰居] 已達最後一頁，停止翻頁");
+        break;
+      }
+      const firstRowText = await page.evaluate(() => {
+        var _a;
+        const rows = Array.from(document.querySelectorAll("tr")).filter((tr) => tr.innerText.includes("NT$"));
+        return ((_a = rows[0]) == null ? void 0 : _a.innerText) || "";
+      });
+      await page.evaluate(() => {
+        const nextBtn = Array.from(document.querySelectorAll("span")).find(
+          (s) => {
+            var _a;
+            return ((_a = s.innerText) == null ? void 0 : _a.trim()) === "下一頁";
+          }
+        );
+        if (nextBtn) nextBtn.click();
+      });
+      try {
+        await page.waitForFunction((oldText) => {
+          const rows = Array.from(document.querySelectorAll("tr")).filter((tr) => tr.innerText.includes("NT$"));
+          return rows.length > 0 && rows[0].innerText !== oldText;
+        }, firstRowText, { timeout: 8e3 });
+      } catch (e) {
+        console.log("[好鄰居] 翻頁等待超時，停止");
+        break;
+      }
+      pageCount++;
+    }
+    console.log(`[好鄰居] 全部抓取完成，共 ${allResults.length} 筆`);
+    return allResults;
   }
 }
 class YuShengConnector extends Connector {
@@ -753,8 +828,8 @@ class YuShengConnector extends Connector {
       const accountInput = page.locator('input[name="account"], input[placeholder*="帳號"]').first();
       await accountInput.waitFor({ state: "visible", timeout: 5e3 });
       console.log("[宇盛] 正在擬人化輸入帳密...");
-      await this.humanType(page, 'input[name="account"]', creds.username);
-      await this.humanType(page, 'input[name="pwd"]', creds.password);
+      await this.fastType(page, 'input[name="account"]', creds.username);
+      await this.fastType(page, 'input[name="pwd"]', creds.password);
       await page.click("#ulogin_submit2", { force: true });
       await page.waitForTimeout(2e3);
     } catch (e) {
@@ -775,55 +850,75 @@ class YuShengConnector extends Connector {
       console.log("[宇盛] 搜尋逾時或無結果");
       return [];
     }
-    const results = await page.evaluate((platform) => {
+    const allResults = [];
+    let pageCount = 1;
+    const MAX_PAGES = 50;
+    while (pageCount <= MAX_PAGES) {
       try {
-        const rows = Array.from(document.querySelectorAll("li.d-lg-block")).filter((row) => {
-          return row.querySelector("a.text-info") !== null && !row.innerText.includes("產品圖");
-        });
-        if (rows.length === 0) return [];
-        return rows.map((row) => {
-          var _a;
-          const rowText = row.innerText;
-          const nameEl = row.querySelector(".fw-bolder");
-          const name = nameEl ? nameEl.innerText.trim() : "未知藥品";
-          const nhiEl = row.querySelector("a.text-info");
-          const nhiCode = nhiEl ? nhiEl.innerText.trim() : "";
-          const nhiPriceMatch = rowText.match(/健保價\s*[:：]\s*([\d,.]+)/);
-          const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, "")) : 0;
-          const priceEl = row.querySelector("span.fs-5");
-          const price = priceEl ? parseFloat(priceEl.innerText.replace(/[^0-9.]/g, "")) : 0;
-          const priceAreaText = ((_a = priceEl == null ? void 0 : priceEl.parentElement) == null ? void 0 : _a.innerText) || "";
-          const unitMatch = priceAreaText.match(/\/\s*([^\n\s：:]+)/);
-          const unit = unitMatch ? unitMatch[1].trim() : "單位";
-          const isOutOfStock = row.querySelector(".text-outofstock") !== null;
-          const stock = isOutOfStock ? "缺貨中" : "有供貨";
-          const expiryMatch = rowText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
-          const expiry = expiryMatch ? expiryMatch[1] : "";
-          let unitPrice = void 0;
-          const sizeMatch = name.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
-          if (sizeMatch && price > 0) {
-            const size = parseInt(sizeMatch[1]);
-            if (size > 0) unitPrice = Math.round(price / size * 100) / 100;
-          }
-          return {
-            platform,
-            name,
-            spec: "",
-            price,
-            unit,
-            unitPrice,
-            stock,
-            link: window.location.href,
-            expiry,
-            nhiCode,
-            nhiPrice
-          };
-        });
+        await page.waitForSelector("li.d-lg-block", { timeout: 8e3 });
+        await page.waitForTimeout(500);
       } catch (e) {
-        return [];
+        console.log(`[宇盛] 第 ${pageCount} 頁無資料或載入超時`);
+        break;
       }
-    }, this.platformName);
-    return results;
+      const pageResults = await page.evaluate((platform) => {
+        try {
+          const rows = Array.from(document.querySelectorAll("li.d-lg-block")).filter((row) => {
+            return row.querySelector("a.text-info") !== null && !row.innerText.includes("產品圖");
+          });
+          if (rows.length === 0) return [];
+          return rows.map((row) => {
+            var _a;
+            const rowText = row.innerText;
+            const nameEl = row.querySelector(".fw-bolder");
+            const name = nameEl ? nameEl.innerText.trim() : "未知藥品";
+            const nhiEl = row.querySelector("a.text-info");
+            const nhiCode = nhiEl ? nhiEl.innerText.trim() : "";
+            const nhiPriceMatch = rowText.match(/健保價\s*[:：]\s*([\d,.]+)/);
+            const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, "")) : 0;
+            const priceEl = row.querySelector("span.fs-5");
+            const price = priceEl ? parseFloat(priceEl.innerText.replace(/[^0-9.]/g, "")) : 0;
+            const priceAreaText = ((_a = priceEl == null ? void 0 : priceEl.parentElement) == null ? void 0 : _a.innerText) || "";
+            const unitMatch = priceAreaText.match(/\/\s*([^\n\s：:]+)/);
+            const unit = unitMatch ? unitMatch[1].trim() : "單位";
+            const isOutOfStock = row.querySelector(".text-outofstock") !== null;
+            const stock = isOutOfStock ? "缺貨中" : "有供貨";
+            const expiryMatch = rowText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+            const expiry = expiryMatch ? expiryMatch[1] : "";
+            let unitPrice = void 0;
+            const sizeMatch = name.match(/(\d+)(?:PTP|錠|粒|顆|支|瓶|入|T)/i);
+            if (sizeMatch && price > 0) {
+              const size = parseInt(sizeMatch[1]);
+              if (size > 0) unitPrice = Math.round(price / size * 100) / 100;
+            }
+            return { platform, name, spec: "", price, unit, unitPrice, stock, link: window.location.href, expiry, nhiCode, nhiPrice };
+          });
+        } catch (e) {
+          return [];
+        }
+      }, this.platformName);
+      if (pageResults.length === 0) break;
+      allResults.push(...pageResults);
+      console.log(`[宇盛] 第 ${pageCount} 頁抓取完成，目前共 ${allResults.length} 筆`);
+      const nextBtn = await page.$('a.page-link[aria-label="Next"]');
+      if (!nextBtn) {
+        console.log("[宇盛] 已達最後一頁，停止翻頁");
+        break;
+      }
+      await nextBtn.click();
+      try {
+        await page.waitForFunction((oldPage) => {
+          const activeEl = document.querySelector("li.page-item.active a.page-link");
+          return activeEl ? parseInt(activeEl.textContent || "0") > oldPage : false;
+        }, pageCount, { timeout: 8e3 });
+        pageCount++;
+      } catch (e) {
+        console.log("[宇盛] 翻頁等待超時，停止");
+        break;
+      }
+    }
+    console.log(`[宇盛] 全部抓取完成，共 ${allResults.length} 筆`);
+    return allResults;
   }
 }
 class MDTConnector extends Connector {
@@ -836,42 +931,49 @@ class MDTConnector extends Connector {
   async isLoggedIn(page) {
     try {
       const currentUrl = page.url();
-      return currentUrl.includes("mdtky.com.tw/Shop/") || currentUrl.includes("Product/Search");
+      return currentUrl.includes("mdtky.com.tw/Shop/") || currentUrl.includes("Product/Search") || currentUrl === "https://www.mdtky.com.tw/";
     } catch (e) {
       return false;
     }
   }
   async login(page, creds) {
+    console.log("[蔓達特] 正在導向登入頁面...");
     await page.goto(this.baseUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1e3);
     if (await this.isLoggedIn(page)) return true;
-    await this.humanType(page, "input#Account", creds.username);
-    await this.humanType(page, "input#PWD", creds.password);
+    console.log("[蔓達特] 正在打字輸入帳密 (擬人化)...");
+    await this.fastType(page, "input#Account", creds.username);
+    await this.fastType(page, "input#PWD", creds.password);
     if (this.captchaHandler) {
       try {
+        console.log("[蔓達特] 偵測驗證碼圖片...");
         const captchaImg = page.locator('#validimg, img#ImgCaptcha, img[src*="Captcha"]').first();
         await captchaImg.waitFor({ state: "visible", timeout: 5e3 });
         const screenshot = await captchaImg.screenshot({ type: "png" });
         const base64Image = `data:image/png;base64,${screenshot.toString("base64")}`;
+        console.log("[蔓達特] 已截取驗證碼，正在請求使用者輸入...");
+        const code = await this.captchaHandler(this.platformId, this.platformName, base64Image);
+        console.log(`[蔓達特] 收到輸入: ${code}，正在自動填入並登入...`);
+        await page.waitForTimeout(500);
         const inputSelector = '#captchaTextBox, input#Code, input[name="Code"]';
-        const code = await Promise.race([
-          this.captchaHandler(this.platformId, this.platformName, base64Image),
-          page.waitForFunction((s) => {
-            var _a;
-            return ((_a = document.querySelector(s)) == null ? void 0 : _a.value.length) >= 4;
-          }, inputSelector, { timeout: 6e4 }).then(() => "MANUAL"),
-          page.waitForFunction(() => window.location.href.includes("Shop/"), { timeout: 6e4 }).then(() => "SUCCESS")
-        ]);
-        if (code !== "SUCCESS" && code !== "MANUAL" && code) {
-          await page.fill(inputSelector, code);
-          await page.keyboard.press("Enter");
-        }
+        await page.fill(inputSelector, code);
+        await page.keyboard.press("Enter");
+        await page.click('input[type="submit"], input[value="登入"], #btnsend').catch(() => {
+        });
       } catch (e) {
+        console.log("[蔓達特] 無法自動定位驗證碼，切換回手動等待模式...");
       }
     }
     try {
-      await page.waitForURL(/Shop|Product|Search/, { timeout: 15e3 });
-      await page.goto("https://www.mdtky.com.tw/Shop/Product/index", { waitUntil: "domcontentloaded" });
+      console.log("[蔓達特] 等待登入狀態確認...");
+      await page.waitForFunction(() => {
+        const url2 = window.location.href;
+        return url2.includes("mdtky.com.tw/Shop/") || url2.includes("Product/Search") || url2 === "https://www.mdtky.com.tw/";
+      }, { timeout: 12e4 });
+      console.log("[蔓達特] 偵測到登入成功，正在跳轉至產品搜尋頁面...");
+      await page.goto("https://www.mdtky.com.tw/Shop/Product/", { waitUntil: "domcontentloaded" });
     } catch (e) {
+      console.warn("[蔓達特] 登入超時，請檢查驗證碼是否正確。");
     }
     return true;
   }
@@ -992,8 +1094,8 @@ class CodaConnector extends Connector {
     await page.waitForTimeout(1e3);
     if (await this.isLoggedIn(page)) return true;
     console.log("[可達] 正在輸入帳密 (擬人化)...");
-    await this.humanType(page, "input#Account", creds.username);
-    await this.humanType(page, "input#Password", creds.password);
+    await this.fastType(page, "input#Account", creds.username);
+    await this.fastType(page, "input#Password", creds.password);
     await page.click("input#Submit");
     try {
       await page.waitForFunction(() => {
@@ -1083,8 +1185,8 @@ class YCConnector extends Connector {
     const passField = "input#password_login";
     await page.waitForSelector(userField, { timeout: 1e4 });
     console.log("[益全] 正在填寫帳密...");
-    await this.humanType(page, userField, creds.username);
-    await this.humanType(page, passField, creds.password);
+    await this.fastType(page, userField, creds.username);
+    await this.fastType(page, passField, creds.password);
     console.log("[YC] Clicking login button...");
     await page.click("button#submit-btn");
     await page.waitForTimeout(2e3);
@@ -1145,8 +1247,9 @@ class YCConnector extends Connector {
         const priceEl = card.querySelector(".product_item_price");
         const priceText = priceEl ? priceEl.innerText.replace(/[^0-9.]/g, "") : "0";
         const price = parseFloat(priceText) || 0;
-        const stockEl = card.querySelector(".product_item_stock");
-        const stock = stockEl ? stockEl.innerText.trim() : "有供貨";
+        const stockEl = card.querySelector(".product_item_out_stock");
+        const stockQty = stockEl ? stockEl.innerText.trim() : "";
+        const stock = stockQty ? `庫存：${stockQty}` : "有供貨";
         const unitMatch = name.match(/\/ (盒|袋|瓶|支|組|排)/) || text.match(/(?:包裝|\/)\s*\d*\s*(盒|袋|瓶|支|組|排)/);
         const unit = unitMatch ? unitMatch[1] : "單位";
         let unitPrice = void 0;
@@ -1194,8 +1297,8 @@ class TaichungConnector extends Connector {
     await page.click("a.signin.gosign");
     await page.waitForTimeout(1e3);
     console.log("[泰昌] 正在輸入帳密 (擬人化)...");
-    await this.humanType(page, "input[placeholder='請輸入登入帳號']", creds.username);
-    await this.humanType(page, "input[placeholder='請輸入登入密碼']", creds.password);
+    await this.fastType(page, "input[placeholder='請輸入登入帳號']", creds.username);
+    await this.fastType(page, "input[placeholder='請輸入登入密碼']", creds.password);
     console.log("[Taichung] Clicking login button...");
     await page.click("a#ulogin_submit");
     await page.waitForTimeout(4e3);
@@ -1208,9 +1311,10 @@ class TaichungConnector extends Connector {
   async search(page, searchTerm, filters) {
     console.log(`[泰昌] 正準備搜尋: "${searchTerm}", Filters: ${JSON.stringify(filters)}`);
     const isCode = (filters == null ? void 0 : filters.code) === true;
+    const isComponent = (filters == null ? void 0 : filters.component) === true;
     const targetUrl = "https://taichung-pc.com.tw/order.php?act=order";
-    const targetSelector = isCode ? 'input[name="hid"]' : 'input[name="drug"]';
-    const fieldName = isCode ? "健保碼" : "品名";
+    const targetSelector = isCode ? 'input[name="hid"]' : isComponent ? 'input[name="emt_drug"]' : 'input[name="drug"]';
+    const fieldName = isCode ? "健保碼" : isComponent ? "成分" : "品名";
     console.log(`[泰昌] ===============================`);
     console.log(`[泰昌] 判定結果: ${fieldName}`);
     console.log(`[泰昌] 動作: 跳轉至訂購頁並填入 ${fieldName} 欄位`);
@@ -12743,7 +12847,8 @@ function startHttpBridge() {
               result = { success: false, error: "Captcha request not found" };
             }
           } else if (channel === "search-nhi-local") {
-            result = await searchNhiLocal(args[0]);
+            const { searchTerm: nhiTerm, filters: nhiFilters } = args[0] || {};
+            result = await searchNhiLocal(nhiTerm, nhiFilters);
           } else if (channel === "get-drug-appearance") {
             result = await getDrugAppearance(args[0].license, args[0].name, args[0].nhiCode);
           } else if (channel === "ping") {
