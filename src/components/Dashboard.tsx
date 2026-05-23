@@ -968,10 +968,17 @@ const Dashboard = () => {
                 // 複方過濾邏輯 (如果開啟精確過濾)
                 let isMatch = basicMatch;
                 if (isStrictFilter && term && basicMatch) {
-                  const isSearchCompound = term.includes('/') || term.includes('+');
-                  const isProductCompound = (p.name + p.spec).includes('/') || (p.name + p.spec).includes('+');
-                  
-                  // 如果搜尋的是單方 (沒斜線)，但產品是複方 (有斜線)，則隱藏
+                  // 複方判斷：斜線兩側都是 4 個以上英文字母才算複方成分
+                  // 排除劑量/單位格式（如 100MG/TAB、30錠/盒、5ML/VIAL）
+                  const isActualCompound = (text: string) =>
+                    /[A-Za-z]{4,}\/[A-Za-z]{4,}/.test(text);
+
+                  const isSearchCompound = term.includes('+') || isActualCompound(term);
+                  const isProductCompound =
+                    (p.name + (p.spec || '')).includes('+') ||
+                    isActualCompound(p.name + (p.spec || ''));
+
+                  // 如果搜尋的是單方，但產品是複方，則隱藏
                   if (!isSearchCompound && isProductCompound) {
                     isMatch = false;
                   }
