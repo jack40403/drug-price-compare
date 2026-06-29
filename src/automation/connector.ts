@@ -33,7 +33,7 @@ export abstract class Connector {
    * 用於搜尋框，實現零延遲
    */
   protected async fastType(page: Page, selector: string, text: string) {
-    const input = page.locator(selector).first();
+    const input = page.locator(selector).filter({ visible: true }).first();
     await input.waitFor({ state: 'visible', timeout: 5000 });
     await input.click();
     // 直接使用 fill 達成瞬間貼入效果
@@ -44,7 +44,7 @@ export abstract class Connector {
    * 擬人化輸入 (已加速至 2ms)
    */
   async humanType(page: Page, selector: string, text: string) {
-    const element = page.locator(selector).first();
+    const element = page.locator(selector).filter({ visible: true }).first();
     await element.waitFor({ state: 'visible' });
     await element.focus();
 
