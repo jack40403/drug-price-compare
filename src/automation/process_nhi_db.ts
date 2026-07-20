@@ -7,7 +7,8 @@ import path from 'path';
 // but for standard drug names, we will attempt common parsing.
 
 const FILES = ['all1_11504_1.TXT', 'all1_11504_2.TXT'];
-const OUTPUT_FILE = 'C:/drug-price-compare/src/assets/nhi_index.json';
+const PROJECT_ROOT = path.resolve(__dirname, '../../');
+const OUTPUT_FILE = path.join(PROJECT_ROOT, 'src/assets/nhi_index.json');
 
 interface NHIData {
   code: string;
@@ -24,7 +25,7 @@ async function processDB() {
   let totalLines = 0;
 
   for (const filename of FILES) {
-    const filePath = path.join('C:/drug-price-compare', filename);
+    const filePath = path.join(PROJECT_ROOT, '健保藥品離線資料庫', filename);
     if (!fs.existsSync(filePath)) {
       console.warn(`找不到檔案: ${filename}, 跳過。`);
       continue;

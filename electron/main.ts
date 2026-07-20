@@ -19,6 +19,29 @@ import { Connector } from '../src/automation/connector'
 import iconv from 'iconv-lite'
 import readline from 'readline'
 
+const portableRoot = process.env.DRUG_PRICE_PORTABLE_ROOT
+  ? path.resolve(process.env.DRUG_PRICE_PORTABLE_ROOT)
+  : app.isPackaged
+    ? path.dirname(process.execPath)
+    : process.cwd()
+const portableDataDir = process.env.DRUG_PRICE_PORTABLE_DATA
+  ? path.resolve(process.env.DRUG_PRICE_PORTABLE_DATA)
+  : path.join(portableRoot, 'Data')
+const resourceRoot = app.isPackaged ? process.resourcesPath : process.cwd()
+
+for (const dir of [portableDataDir, path.join(portableDataDir, 'config'), path.join(portableDataDir, 'logs')]) {
+  fs.mkdirSync(dir, { recursive: true })
+}
+app.setPath('userData', path.join(portableDataDir, 'config'))
+
+function dataPath(...parts: string[]) {
+  return path.join(portableDataDir, ...parts)
+}
+
+function resourcePath(...parts: string[]) {
+  return path.join(resourceRoot, ...parts)
+}
+
 function fullToHalf(s: string) {
   if (!s) return '';
   return s.toString().replace(/[\uFF01-\uFF5E]/g, function (ch) {
@@ -55,16 +78,43 @@ function normalizeName(s: string) {
 }
 
 function logToFile(message: string) {
-  const logPath = path.join(process.cwd(), 'debug.log');
+  const logPath = dataPath('logs', 'debug.log');
   const timestamp = new Date().toISOString();
   const mem = (process.memoryUsage().rss / 1024 / 1024).toFixed(2);
   const formattedMessage = `[${timestamp}] [MEM: ${mem}MB] ${message}\n`;
   try {
     fs.appendFileSync(logPath, formattedMessage, 'utf8');
-    console.log(formattedMessage.trim());
+    originalConsoleLog(formattedMessage.trim());
   } catch (err) {
-    console.error('Failed to write to debug.log:', err);
+    originalConsoleError('Failed to write to debug.log:', err);
   }
+}
+
+function stringifyLogPart(part: unknown) {
+  if (part instanceof Error) return part.stack || part.message
+  if (typeof part === 'string') return part
+  try {
+    return JSON.stringify(part)
+  } catch {
+    return String(part)
+  }
+}
+
+const originalConsoleLog = console.log.bind(console)
+const originalConsoleWarn = console.warn.bind(console)
+const originalConsoleError = console.error.bind(console)
+
+console.log = (...args: unknown[]) => {
+  originalConsoleLog(...args)
+  logToFile(args.map(stringifyLogPart).join(' '))
+}
+console.warn = (...args: unknown[]) => {
+  originalConsoleWarn(...args)
+  logToFile(`[WARN] ${args.map(stringifyLogPart).join(' ')}`)
+}
+console.error = (...args: unknown[]) => {
+  originalConsoleError(...args)
+  logToFile(`[ERROR] ${args.map(stringifyLogPart).join(' ')}`)
 }
 
 /**
@@ -101,7 +151,7 @@ async function writeJsonSegmented(filePath: string, data: any[]) {
 const store = new Store('drug-price-compare')
 
 process.env.DIST = path.join(__dirname, '../dist')
-process.env.VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL'] as string
+const viteDevServerUrl = process.env['VITE_DEV_SERVER_URL']
 
 let win: BrowserWindow | null
 
@@ -121,15 +171,48 @@ class AutomationManager {
     this.headless = headless
   }
 
+  private findPortableChromium(): string | undefined {
+    const browserRoots = [
+      resourcePath('browsers'),
+      path.join(process.cwd(), 'browsers'),
+      path.join(path.dirname(process.execPath), 'browsers'),
+      path.join(process.resourcesPath, 'browsers'),
+    ]
+
+    for (const root of browserRoots) {
+      if (!fs.existsSync(root)) continue
+      const chromiumDirs = fs.readdirSync(root, { withFileTypes: true })
+        .filter(entry => entry.isDirectory() && entry.name.startsWith('chromium-'))
+        .map(entry => entry.name)
+        .sort()
+        .reverse()
+
+      for (const dir of chromiumDirs) {
+        const executable = path.join(root, dir, 'chrome-win64', 'chrome.exe')
+        if (fs.existsSync(executable)) {
+          console.log(`[Manager] Using portable Chromium: ${executable}`)
+          return executable
+        }
+      }
+    }
+
+    return undefined
+  }
+
   async getContext(): Promise<BrowserContext> {
     if (!this.browser) {
+      const executablePath = this.findPortableChromium()
       this.browser = await chromium.launch({ 
         headless: this.headless,
-        slowMo: this.headless ? 0 : 150 
+        slowMo: this.headless ? 0 : 150,
+        args: ['--ignore-certificate-errors'],
+        ...(executablePath ? { executablePath } : {}),
       })
     }
     if (!this.context) {
-      this.context = await this.browser.newContext()
+      this.context = await this.browser.newContext({
+        ignoreHTTPSErrors: true,
+      })
     }
     return this.context
   }
@@ -144,6 +227,19 @@ class AutomationManager {
     
     console.log(`[Manager] Creating new page for ${platformId}`)
     const newPage = await context.newPage()
+    newPage.on('framenavigated', frame => {
+      if (frame === newPage.mainFrame()) {
+        console.log(`[Manager] ${platformId} navigated: ${frame.url()}`)
+      }
+    })
+    newPage.on('requestfailed', request => {
+      if (request.frame() === newPage.mainFrame()) {
+        console.warn(`[Manager] ${platformId} request failed: ${request.url()} ${request.failure()?.errorText || ''}`)
+      }
+    })
+    newPage.on('pageerror', error => {
+      console.warn(`[Manager] ${platformId} page error: ${error.message}`)
+    })
     this.pages.set(platformId, newPage)
     return newPage
   }
@@ -183,8 +279,15 @@ function createWindow() {
     title: '藥師比價專家 - V2',
   })
 
-  if (process.env.VITE_DEV_SERVER_URL) {
-    win.loadURL(process.env.VITE_DEV_SERVER_URL as string)
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    logToFile(`Renderer failed to load: ${errorCode} ${errorDescription} ${validatedURL}`)
+  })
+  win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    if (level >= 2) logToFile(`Renderer console [${level}]: ${message} (${sourceId}:${line})`)
+  })
+
+  if (viteDevServerUrl) {
+    win.loadURL(viteDevServerUrl)
   } else {
     win.loadFile(join(process.env.DIST as string, 'index.html'))
   }
@@ -289,10 +392,32 @@ async function performSearch(searchTerm: string, platforms: string[], filters?: 
 
   const searchTasks = connectors.map(async (connector) => {
     try {
-      if (isSearchInterrupted) return []
+      win?.webContents.send('platform-search-status', {
+        platformId: connector.platformId,
+        platformName: connector.platformName,
+        status: 'searching',
+      })
+
+      if (isSearchInterrupted) {
+        win?.webContents.send('platform-search-results', {
+          platformId: connector.platformId,
+          platformName: connector.platformName,
+          status: 'done',
+          results: [],
+        })
+        return []
+      }
 
       const creds: any = (store as any).get(`creds.${connector.platformId}`)
-      if (!creds) return []
+      if (!creds) {
+        win?.webContents.send('platform-search-results', {
+          platformId: connector.platformId,
+          platformName: connector.platformName,
+          status: 'done',
+          results: [],
+        })
+        return []
+      }
 
       const page = await automationManager.getPageForPlatform(connector.platformId)
       const decryptedPassword = safeStorage.decryptString(Buffer.from(creds.password, 'base64'))
@@ -302,18 +427,44 @@ async function performSearch(searchTerm: string, platforms: string[], filters?: 
       // 關鍵修正：登入程序結束後（不論成功失敗），通知前端關閉該平台的驗證碼視窗
       win?.webContents.send('clear-captcha-for-platform', connector.platformId);
       
-      if (isSearchInterrupted) return []
-      
-      if (success) {
-        return await connector.search(page, searchTerm, filters)
+      if (isSearchInterrupted) {
+        win?.webContents.send('platform-search-results', {
+          platformId: connector.platformId,
+          platformName: connector.platformName,
+          status: 'done',
+          results: [],
+        })
+        return []
       }
-      return []
+      
+      let results: any[] = []
+      if (success) {
+        results = (await connector.search(page, searchTerm, filters)).map((result: any) => ({
+          ...result,
+          platformId: connector.platformId,
+        }))
+      }
+
+      win?.webContents.send('platform-search-results', {
+        platformId: connector.platformId,
+        platformName: connector.platformName,
+        status: 'done',
+        results,
+      })
+      return results
     } catch (e) {
       if (isSearchInterrupted) {
         console.log(`[Main] Search for ${connector.platformId} interrupted.`)
       } else {
         console.error(`[Main] Error in automation task for ${connector.platformId}:`, e)
       }
+      win?.webContents.send('platform-search-results', {
+        platformId: connector.platformId,
+        platformName: connector.platformName,
+        status: isSearchInterrupted ? 'done' : 'error',
+        results: [],
+        error: e instanceof Error ? e.message : String(e),
+      })
       return []
     }
   })
@@ -338,7 +489,7 @@ async function processNhiTxt(event: any, filePaths: string[]) {
   const appearanceMap = new Map();
   const apNameMap = new Map(); // 用名稱作為索引的備用地圖
   
-  const appearancePath = path.join(process.cwd(), '藥品外觀/42_5.json');
+  const appearancePath = resourcePath('藥品外觀', '42_5.json');
   if (fs.existsSync(appearancePath)) {
     try {
       const rawAp = JSON.parse(fs.readFileSync(appearancePath, 'utf8'));
@@ -503,7 +654,7 @@ async function processNhiTxt(event: any, filePaths: string[]) {
   const finalResults = Array.from(db.values())
   nhiDatabase = finalResults
   
-  const outputPath = path.join(process.cwd(), 'src/assets/nhi_index.json')
+  const outputPath = dataPath('nhi_index.json')
   try {
     await writeJsonSegmented(outputPath, finalResults);
     console.log(`[Main] Database updated segmented. Unique: ${finalResults.length}`)
@@ -534,7 +685,7 @@ ipcMain.handle('open-file-dialog', async (event) => {
 
 // 自動掃描安裝目錄中的全部 NHI TXT / B5
 ipcMain.handle('auto-index-nhi', async (event) => {
-  const NHI_DIR = path.join(process.cwd(), '健保藥品離線資料庫');
+  const NHI_DIR = resourcePath('健保藥品離線資料庫');
   logToFile(`自動掃描健保資料庫: ${NHI_DIR}`);
 
   if (!fs.existsSync(NHI_DIR)) {
@@ -579,7 +730,7 @@ let drugNameAppearanceMap: Map<string, any> = new Map() // Secondary index for n
 async function loadDrugAppearance() {
   logToFile('正在載入藥品外觀資料庫...')
   try {
-    const appearancePath = path.join(process.cwd(), '藥品外觀/42_5.json')
+    const appearancePath = resourcePath('藥品外觀', '42_5.json')
     if (fs.existsSync(appearancePath)) {
       const data = JSON.parse(fs.readFileSync(appearancePath, 'utf8'))
       const map = new Map()
@@ -667,6 +818,8 @@ async function loadNhiDatabase() {
   logToFile('開始執行 loadNhiDatabase...');
   try {
     const possiblePaths = [
+      dataPath('nhi_index.json'),
+      path.join(app.getAppPath(), 'src/assets/nhi_index.json'),
       path.join(process.cwd(), 'src/assets/nhi_index.json'),
       path.join(__dirname, '../src/assets/nhi_index.json'),
       path.join(__dirname, 'assets/nhi_index.json')
@@ -743,7 +896,7 @@ async function integrateAppearance() {
   });
 
   if (matchCount > 0) {
-    const outputPath = path.join(process.cwd(), 'src/assets/nhi_index.json');
+    const outputPath = dataPath('nhi_index.json');
     await writeJsonSegmented(outputPath, nhiDatabase);
     logToFile(`外觀整合完成，強化比對成功配對 ${matchCount} 筆圖片。`);
   } else {
@@ -862,7 +1015,7 @@ function startHttpBridge() {
           
           let result;
           if (channel === 'perform-search') {
-            result = await performSearch(args[0].searchTerm, args[0].platforms);
+            result = await performSearch(args[0].searchTerm, args[0].platforms, args[0].filters);
           } else if (channel === 'submit-captcha') {
             const { platformId, code } = args[0];
             const captchaReq = pendingCaptchas.find(r => r.platformId === platformId);
@@ -893,7 +1046,7 @@ function startHttpBridge() {
             result = await integrateAppearance();
           } else if (channel === 'auto-index-nhi') {
             // Mocking auto-index for bridge
-            const NHI_DIR = path.join(process.cwd(), '健保藥品離線資料庫');
+            const NHI_DIR = resourcePath('健保藥品離線資料庫');
             if (fs.existsSync(NHI_DIR)) {
               const allFiles = fs.readdirSync(NHI_DIR).filter(f => /\.(txt|b5)$/i.test(f)).map(f => path.join(NHI_DIR, f));
               if (allFiles.length > 0) {
@@ -935,7 +1088,7 @@ function startHttpBridge() {
     // --- Static File Serving ---
     if (req.method === 'GET') {
       if (pathname === '/') pathname = '/index.html';
-      const distPath = path.join(process.cwd(), 'dist');
+      const distPath = path.join(app.getAppPath(), 'dist');
       const filePath = path.join(distPath, pathname);
 
       // Security check: ensure path is within dist
@@ -985,7 +1138,15 @@ function startHttpBridge() {
     res.end();
   });
 
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Bridge] HTTP Bridge Server running at http://0.0.0.0:${PORT}`);
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+      console.warn(`[Bridge] Port ${PORT} is already in use. Desktop IPC remains available; HTTP bridge is disabled.`)
+      return
+    }
+    console.error('[Bridge] HTTP server error:', error)
+  })
+
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log(`[Bridge] HTTP Bridge Server running at http://127.0.0.1:${PORT}`);
   });
 }

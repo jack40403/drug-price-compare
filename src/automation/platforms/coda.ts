@@ -14,121 +14,183 @@ export class CodaConnector extends Connector {
     this.context = context
   }
 
-  // ── Session check ──────────────────────────────────────────────
+  private async goToLogin(page: Page): Promise<boolean> {
+    const loginUrls = [
+      'https://www.codadrug.com.tw/',
+      'https://www.codadrug.com.tw/Home/Index',
+    ]
+
+    for (const url of loginUrls) {
+      try {
+        console.log(`[Coda] Navigating to login URL: ${url}`)
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+        await page.waitForTimeout(800)
+        console.log(`[Coda] Current URL after login navigation: ${page.url()}`)
+
+        const accountVisible = await page.locator(
+          'input#Account, input[name="Account"]'
+        ).first().isVisible().catch(() => false)
+        if (accountVisible || await this.isLoggedIn(page)) return true
+      } catch (e) {
+        console.warn(`[Coda] Login navigation failed for ${url}:`, e)
+      }
+    }
+
+    return false
+  }
+
   async isLoggedIn(page: Page): Promise<boolean> {
     try {
+      const loginFormVisible = await page.locator(
+        'input#Account, input[name="Account"]'
+      ).first().isVisible().catch(() => false)
+      if (loginFormVisible) return false
+
       const url = page.url()
-      // 只要進入首頁、產品頁或訂單頁，即視為登入成功
-      return url.includes('/Home/Index') || url.includes('/Product/') || url.includes('/Order/')
-    } catch (e) {
+      const logoutVisible = await page.locator(
+        'a[href*="Logout" i], a[href*="LogOut" i], text=登出'
+      ).first().isVisible().catch(() => false)
+
+      return logoutVisible || url.includes('/Product/') || url.includes('/Order/')
+    } catch {
       return false
     }
   }
 
+  private async canUseProductSearch(page: Page): Promise<boolean> {
+    const searchVisible = await page.locator(
+      'input#SearchInput, input[name="SearchInput"], input[type="search"]'
+    ).first().isVisible().catch(() => false)
+    const loginVisible = await page.locator(
+      'input#Account, input[name="Account"]'
+    ).first().isVisible().catch(() => false)
+    return searchVisible && !loginVisible
+  }
+
   async login(page: Page, creds: any): Promise<boolean> {
-    console.log('[可達] 正在導向登入頁面...')
-    await page.goto(this.baseUrl, { waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(1000)
+    console.log('[Coda] Starting login flow')
+    if (!(await this.goToLogin(page))) {
+      console.warn(`[Coda] Login page did not become ready. Current URL: ${page.url()}`)
+      return false
+    }
 
     if (await this.isLoggedIn(page)) return true
 
-    console.log('[可達] 正在輸入帳密 (擬人化)...')
-    await this.fastType(page, 'input#Account', creds.username)
-    await this.fastType(page, 'input#Password', creds.password)
-    await page.click('input#Submit')
+    const account = page.locator('input#Account, input[name="Account"]').first()
+    const password = page.locator('input#Password, input[name="Password"]').first()
+    const submit = page.locator('input#Submit, button#Submit, input[type="submit"]').first()
 
-    // 等待跳轉，縮短超時時間並增加靈活性
-    try {
-      await page.waitForFunction(() => {
-        const url = window.location.href
-        return url.includes('/Home/Index') || url.includes('/Product/')
-      }, { timeout: 15000 })
-    } catch (e) {
-      console.warn('[可達] 登入跳轉緩慢，繼續嘗試下一步...')
+    await account.waitFor({ state: 'visible', timeout: 10000 })
+    await account.fill(creds.username)
+    await password.fill(creds.password)
+
+    if (await account.inputValue() !== creds.username || !(await password.inputValue())) {
+      console.error('[Coda] Credential fields did not retain the filled values')
+      return false
     }
 
-    return await this.isLoggedIn(page)
+    await submit.click()
+    console.log(`[Coda] Submitted login form. Current URL: ${page.url()}`)
+
+    try {
+      await page.waitForFunction(() => {
+        const loginForm = document.querySelector<HTMLInputElement>('input#Account, input[name="Account"]')
+        const formVisible = !!loginForm && !!loginForm.offsetParent
+        const url = window.location.href
+        return !formVisible || url.includes('/Product/') || url.includes('/Order/')
+      }, { timeout: 15000 })
+    } catch {
+      console.warn('[Coda] Login redirect was slow; checking current page state')
+    }
+
+    const loggedIn = await this.isLoggedIn(page)
+    console.log(`[Coda] Login result=${loggedIn}, current URL=${page.url()}`)
+    if (loggedIn) return true
+
+    try {
+      console.log('[Coda] Login state unclear; probing product search page')
+      await page.goto('https://www.codadrug.com.tw/Product/Product', { waitUntil: 'domcontentloaded', timeout: 30000 })
+      await page.waitForTimeout(1000)
+      console.log(`[Coda] URL after product probe: ${page.url()}`)
+      if (await this.canUseProductSearch(page)) {
+        console.log('[Coda] Product search is available; treating session as logged in')
+        return true
+      }
+    } catch (e) {
+      console.warn('[Coda] Product search probe failed:', e)
+    }
+
+    if (!loggedIn) {
+      const validationMessage = await page.locator(
+        '.validation-summary-errors, .field-validation-error, .alert-danger, .text-danger'
+      ).allTextContents().catch(() => [])
+      console.warn(`[Coda] Login failed message: ${validationMessage.join(' | ') || 'no visible validation message'}`)
+    }
+    return false
   }
 
   async search(page: Page, searchTerm: string, filters?: any): Promise<ProductResult[]> {
-    console.log(`[可達] 執行穩定版搜尋: "${searchTerm}", Filters: ${JSON.stringify(filters)}`)
+    console.log(`[Coda] Searching for "${searchTerm}", Filters: ${JSON.stringify(filters)}`)
 
-    // 直接跳轉到產品區域
     if (!page.url().includes('/Product/Product')) {
-      await page.goto('https://www.codadrug.com.tw/Product/Product', { waitUntil: 'domcontentloaded' })
+      console.log('[Coda] Navigating to product search page')
+      await page.goto('https://www.codadrug.com.tw/Product/Product', { waitUntil: 'domcontentloaded', timeout: 30000 })
+      console.log(`[Coda] Current URL after product navigation: ${page.url()}`)
     }
 
     try {
-      // 1. [自動開啟搜尋框] 點選放大鏡或搜尋標籤
       const searchTrigger = page.locator('i.fa-search, label[for="SearchInput"], .search-icon').first()
-      await searchTrigger.scrollIntoViewIfNeeded()
-      await searchTrigger.click()
+      await searchTrigger.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {})
+      await searchTrigger.click({ timeout: 5000 }).catch(() => {})
       await page.waitForTimeout(300)
 
-      // 2. [極速輸入]
-      const searchInput = 'input#SearchInput'
-      console.log('[可達] 執行極速貼入搜尋...')
+      const searchInput = 'input#SearchInput, input[name="SearchInput"], input[type="search"]'
       await this.fastType(page, searchInput, searchTerm)
       await page.keyboard.press('Enter')
-
-      // 3. 等待清單載入
-      await page.waitForSelector('a.item', { timeout: 10000 })
+      await page.waitForSelector('a.item, .item', { timeout: 10000 })
     } catch (e) {
-      console.warn('[可達] 搜尋控制項操作失靈:', e)
+      console.warn(`[Coda] Search controls failed at URL ${page.url()}:`, e)
       return []
     }
 
-    // ── Parse result cards ───────────────────────────────────────
     const results: ProductResult[] = await page.evaluate((platform) => {
-      // 可達的卡片通常是 a.item
       const items = Array.from(document.querySelectorAll('a.item, .item'))
       return items.map((item) => {
-        const text = (item as HTMLElement).innerText;
-        if (!text.includes('藥品名稱')) return null;
+        const text = (item as HTMLElement).innerText || ''
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+        const hasDrugName = text.includes('藥品') || text.includes('品名') || lines.length >= 2
+        if (!hasDrugName) return null
 
-        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-
-        // 1. 健保序號與健保價
-        const nhiCodeMatch = text.match(/健保碼[：:]\s*([A-Z0-9]{10})/);
-        const nhiCode = nhiCodeMatch ? nhiCodeMatch[1] : '';
-        
-        const nhiPriceMatch = text.match(/健保價[：:]\s*([\d,.]+)/);
-        const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, '')) : 0;
-
-        // 2. 品名
-        const nameMatch = text.match(/藥品名稱[：:]\s*([^\n]+)/);
-        const name = nameMatch ? nameMatch[1].trim() : (lines[2] || '未知藥品');
-
-        // 3. 售價 (總價 / 單價)
-        // 格式範例: "193 / 7.3"
-        const pricePatternMatch = text.match(/([\d,.]+)\s*\/\s*([\d,.]+)/);
-        const price = pricePatternMatch ? parseFloat(pricePatternMatch[1].replace(/,/g, '')) : 0;
-        const unitPrice = pricePatternMatch ? parseFloat(pricePatternMatch[2].replace(/,/g, '')) : 0;
-
-        // 4. 單位
-        const unitMatch = text.match(/單位[：:]\s*(\S+)/);
-        const unit = unitMatch ? unitMatch[1] : '單位';
-
-        // 5. 庫存
-        const isOutOfStock = text.includes('缺貨') || text.includes('售完');
-        const stockStatus = isOutOfStock ? '缺貨中' : '有庫存';
+        const nhiCodeMatch = text.match(/(?:健保碼|健保代碼|代碼)[:：\]\s]*([A-Z0-9]{10})/)
+        const nhiCode = nhiCodeMatch ? nhiCodeMatch[1] : ''
+        const nhiPriceMatch = text.match(/(?:健保價|健保價格)[:：\]\s]*([\d,.]+)/)
+        const nhiPrice = nhiPriceMatch ? parseFloat(nhiPriceMatch[1].replace(/,/g, '')) : 0
+        const nameMatch = text.match(/(?:藥品名稱|品名|藥名)[:：\]\s]*([^\n]+)/)
+        const name = nameMatch ? nameMatch[1].trim() : (lines[1] || lines[0] || '可達商品')
+        const pricePatternMatch = text.match(/([\d,.]+)\s*\/\s*([\d,.]+)/)
+        const price = pricePatternMatch ? parseFloat(pricePatternMatch[1].replace(/,/g, '')) : 0
+        const unitPrice = pricePatternMatch ? parseFloat(pricePatternMatch[2].replace(/,/g, '')) : 0
+        const unitMatch = text.match(/(?:單位|包裝)[:：\]\s]*(\S+)/)
+        const unit = unitMatch ? unitMatch[1] : ''
+        const isOutOfStock = text.includes('缺貨') || text.includes('售完') || text.includes('補貨')
 
         return {
           platform,
-          name: name,
-          spec: lines[0]?.replace('藥品編號:', '').trim() || '',
+          name,
+          spec: lines[0] || '',
           price: isNaN(price) ? 0 : price,
           unitPrice: isNaN(unitPrice) ? 0 : unitPrice,
-          unit: unit,
-          stock: stockStatus,
+          unit,
+          stock: isOutOfStock ? '缺貨' : '有庫存',
           link: (item as HTMLAnchorElement).href || window.location.href,
           expiry: '',
-          nhiCode: nhiCode,
-          nhiPrice: isNaN(nhiPrice) ? 0 : nhiPrice
+          nhiCode,
+          nhiPrice: isNaN(nhiPrice) ? 0 : nhiPrice,
         }
       }).filter((r) => r !== null) as ProductResult[]
     }, this.platformName)
 
+    console.log(`[Coda] Parsed ${results.length} results`)
     return results
   }
 }

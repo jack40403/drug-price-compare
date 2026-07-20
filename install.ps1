@@ -106,11 +106,13 @@ Write-Step 3 4 "安裝 Playwright Chromium 瀏覽器（存至專案內 browsers\
 
 $env:PLAYWRIGHT_BROWSERS_PATH = $BrowsersDir
 
-# 檢查是否已安裝
+# 檢查實際執行檔是否存在，避免留下空資料夾時誤判為安裝完成
 $alreadyInstalled = $false
 if (Test-Path $BrowsersDir) {
-    $chromiumFolders = Get-ChildItem $BrowsersDir -Directory -Filter "chromium-*" -ErrorAction SilentlyContinue
-    if ($chromiumFolders.Count -gt 0) {
+    $chromiumExe = Get-ChildItem $BrowsersDir -File -Recurse -Filter "chrome.exe" -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match 'chromium-[^\\]+\\chrome-win64\\chrome\.exe$' } |
+        Select-Object -First 1
+    if ($chromiumExe) {
         $alreadyInstalled = $true
         Write-OK "Chromium 已安裝於 browsers\ 資料夾，跳過下載"
     }
@@ -118,7 +120,13 @@ if (Test-Path $BrowsersDir) {
 
 if (-not $alreadyInstalled) {
     Write-Host "        正在下載 Chromium（約 200MB，請耐心等候）..." -ForegroundColor Cyan
-    $pwOut = & npx playwright install chromium 2>&1
+    # PowerShell 執行原則可能封鎖 npx.ps1；明確使用 Windows 的 npx.cmd。
+    $npxCommand = (Get-Command npx.cmd -ErrorAction SilentlyContinue).Source
+    if (-not $npxCommand) {
+        Write-ERR "找不到 npx.cmd，請重新安裝 Node.js 後再試。"
+        exit 1
+    }
+    $pwOut = & $npxCommand playwright install chromium 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-WARN "Chromium 安裝失敗"
         Write-Host ($pwOut | Out-String) -ForegroundColor DarkYellow

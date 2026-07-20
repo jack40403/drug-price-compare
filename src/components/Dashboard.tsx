@@ -4,12 +4,22 @@ import DrugAppearanceModal from './DrugAppearanceModal'
 
 interface Product {
   platform: string;
+  platformId?: string;
   name: string;
   spec: string;
   price: number;
   unit: string;
   stock: string;
   isCheapest?: boolean;
+}
+
+type PlatformSearchStatus = 'idle' | 'searching' | 'done' | 'error'
+
+interface PlatformStatusInfo {
+  status: PlatformSearchStatus;
+  count: number;
+  minPrice?: number;
+  error?: string;
 }
 
 const Dashboard = () => {
@@ -39,17 +49,19 @@ const Dashboard = () => {
   const [bridgeConnected, setBridgeConnected] = useState(true) // 預設為 true，網頁版會更新
   const [nhiFilter, setNhiFilter] = useState<'name' | 'code' | 'component'>('name')
   const [marketFilter, setMarketFilter] = useState<'name' | 'code' | 'component'>('name')
+  const [platformStatuses, setPlatformStatuses] = useState<Record<string, PlatformStatusInfo>>({})
 
-  const platformColorMap: Record<string, string> = {
-    'binli': 'bg-blue-100 text-blue-800 border-blue-200',
-    'chahwa': 'bg-emerald-100 text-emerald-800 border-emerald-200',
-    'coda': 'bg-purple-100 text-purple-800 border-purple-200',
-    'jhaohong': 'bg-orange-100 text-orange-800 border-orange-200',
-    'mdt': 'bg-rose-100 text-rose-800 border-rose-200',
-    'taichung': 'bg-cyan-100 text-cyan-800 border-cyan-200',
-    'yc': 'bg-amber-100 text-amber-800 border-amber-200',
-    'yeschain': 'bg-teal-100 text-teal-800 border-teal-200',
-    'yusheng': 'bg-indigo-100 text-indigo-800 border-indigo-200'
+  const platformRowStyles: Record<string, { row: string; strip: string; badge: string; accentText: string }> = {
+    'binli': { row: 'platform-row platform-row-binli', strip: 'platform-strip-binli', badge: 'platform-badge platform-badge-binli', accentText: 'platform-accent-binli' },
+    'chahwa': { row: 'platform-row platform-row-chahwa', strip: 'platform-strip-chahwa', badge: 'platform-badge platform-badge-chahwa', accentText: 'platform-accent-chahwa' },
+    'mdt': { row: 'platform-row platform-row-mdt', strip: 'platform-strip-mdt', badge: 'platform-badge platform-badge-mdt', accentText: 'platform-accent-mdt' },
+    'coda': { row: 'platform-row platform-row-coda', strip: 'platform-strip-coda', badge: 'platform-badge platform-badge-coda', accentText: 'platform-accent-coda' },
+    'jhao-hong': { row: 'platform-row platform-row-jhao-hong', strip: 'platform-strip-jhao-hong', badge: 'platform-badge platform-badge-jhao-hong', accentText: 'platform-accent-jhao-hong' },
+    'yc': { row: 'platform-row platform-row-yc', strip: 'platform-strip-yc', badge: 'platform-badge platform-badge-yc', accentText: 'platform-accent-yc' },
+    'taichung': { row: 'platform-row platform-row-taichung', strip: 'platform-strip-taichung', badge: 'platform-badge platform-badge-taichung', accentText: 'platform-accent-taichung' },
+    'yusheng': { row: 'platform-row platform-row-yusheng', strip: 'platform-strip-yusheng', badge: 'platform-badge platform-badge-yusheng', accentText: 'platform-accent-yusheng' },
+    'yeschain': { row: 'platform-row platform-row-yeschain', strip: 'platform-strip-yeschain', badge: 'platform-badge platform-badge-yeschain', accentText: 'platform-accent-yeschain' },
+    'default': { row: 'platform-row platform-row-default', strip: 'platform-strip-default', badge: 'platform-badge platform-badge-default', accentText: 'platform-accent-default' }
   };
   const PLATFORMS = [
     { id: 'binli', name: '彬利' },
@@ -63,6 +75,56 @@ const Dashboard = () => {
     { id: 'yeschain', name: '好鄰居 (躍獅)' },
   ]
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(PLATFORMS.map(p => p.id))
+  const platformNameMap = Object.fromEntries(PLATFORMS.map(p => [p.id, p.name]))
+  const getProductPlatformId = (product: Product) => {
+    if (product.platformId && platformRowStyles[product.platformId]) return product.platformId
+
+    const platformText = String(product.platform || '').toLowerCase()
+    if (platformText.includes('彬利') || platformText.includes('binli')) return 'binli'
+    if (platformText.includes('嘉鏵') || platformText.includes('chahwa')) return 'chahwa'
+    if (platformText.includes('曼達') || platformText.includes('mdt')) return 'mdt'
+    if (platformText.includes('可達') || platformText.includes('coda')) return 'coda'
+    if (platformText.includes('兆宇') || platformText.includes('兆宏') || platformText.includes('jhao')) return 'jhao-hong'
+    if (platformText.includes('益全') || platformText.includes('yc')) return 'yc'
+    if (platformText.includes('泰昌') || platformText.includes('taichung')) return 'taichung'
+    if (platformText.includes('宇盛') || platformText.includes('yusheng')) return 'yusheng'
+    if (platformText.includes('好鄰居') || platformText.includes('躍獅') || platformText.includes('yeschain')) return 'yeschain'
+
+    return 'default'
+  }
+  const getPlatformRowStyle = (product: Product) => platformRowStyles[getProductPlatformId(product)] || platformRowStyles.default
+  const recomputeCheapest = (products: Product[]) => {
+    const prices = products.map(p => p.price).filter(p => p > 0)
+    const minPrice = prices.length > 0 ? Math.min(...prices) : 0
+    return products.map(p => ({
+      ...p,
+      isCheapest: p.price === minPrice && p.price > 0
+    }))
+  }
+  const summarizePlatformResults = (results: Product[]) => {
+    const prices = results.map(p => p.price).filter(p => p > 0)
+    return {
+      count: results.length,
+      minPrice: prices.length > 0 ? Math.min(...prices) : undefined,
+    }
+  }
+  const normalizeStrictText = (value: any) => String(value || '')
+    .toLowerCase()
+    .replace(/[（）]/g, m => m === '（' ? '(' : ')')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const isStrictNameMatch = (value: any, term: string) => {
+    const text = normalizeStrictText(value)
+    if (!text || !term) return false
+    let start = text.indexOf(term)
+    while (start >= 0) {
+      const prev = start > 0 ? text[start - 1] : ''
+      const isEmbeddedInWord = /[a-z0-9\u3400-\u9fff]/i.test(prev)
+      if (!isEmbeddedInWord) return true
+      start = text.indexOf(term, start + term.length)
+    }
+    return false
+  }
   const togglePlatform = (id: string) => {
     setSelectedPlatforms(prev => 
       prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]
@@ -121,6 +183,8 @@ const Dashboard = () => {
     // Listen for CAPTCHA requests
     let removeCaptchaListener: any;
     let pollInterval: any;
+    let removePlatformStatusListener: any;
+    let removePlatformResultsListener: any;
 
     if (navigator.userAgent.toLowerCase().includes('electron')) {
       // 電腦端監聽
@@ -148,6 +212,42 @@ const Dashboard = () => {
             return next;
           });
         });
+
+        removePlatformStatusListener = (window as any).electronAPI.on('platform-search-status', (data: any) => {
+          if (!data?.platformId) return
+          setPlatformStatuses(prev => ({
+            ...prev,
+            [data.platformId]: {
+              status: data.status || 'searching',
+              count: prev[data.platformId]?.count || 0,
+              minPrice: prev[data.platformId]?.minPrice,
+            }
+          }))
+        });
+
+        removePlatformResultsListener = (window as any).electronAPI.on('platform-search-results', (data: any) => {
+          if (!data?.platformId) return
+          const incoming = ((data.results || []) as Product[]).map(result => ({
+            ...result,
+            platformId: data.platformId,
+          }))
+          const summary = summarizePlatformResults(incoming)
+
+          setPlatformStatuses(prev => ({
+            ...prev,
+            [data.platformId]: {
+              status: data.status === 'error' ? 'error' : 'done',
+              count: summary.count,
+              minPrice: summary.minPrice,
+              error: data.error,
+            }
+          }))
+
+          setSearchResults(prev => {
+            const kept = prev.filter((result: Product) => result.platformId !== data.platformId)
+            return recomputeCheapest([...kept, ...incoming])
+          })
+        });
       }
     } else {
       // 手機端/網頁版：啟動輪詢
@@ -174,6 +274,8 @@ const Dashboard = () => {
     return () => {
       if (typeof removeListener === 'function') removeListener()
       if (typeof removeCaptchaListener === 'function') removeCaptchaListener()
+      if (typeof removePlatformStatusListener === 'function') removePlatformStatusListener()
+      if (typeof removePlatformResultsListener === 'function') removePlatformResultsListener()
       if (pollInterval) clearInterval(pollInterval)
     }
   }, [])
@@ -258,6 +360,13 @@ const Dashboard = () => {
     setIsSearching(true)
     setIsStopping(false)
     setSearchResults([])
+    setIsStrictFilter(false)
+    setPlatformStatuses(Object.fromEntries(
+      selectedPlatforms.map(platformId => [
+        platformId,
+        { status: 'searching' as PlatformSearchStatus, count: 0 }
+      ])
+    ))
 
     try {
       // 只發動各平台即時比價，僅包含已勾選的平台
@@ -273,17 +382,36 @@ const Dashboard = () => {
 
       // Calculate cheapest
       if (platformResults) {
-        const allProducts = (platformResults || []).flat() as Product[]
-        const minPrice = allProducts.length > 0 ? Math.min(...allProducts.map(p => p.price).filter(p => p > 0)) : 0
-        const processedResults = allProducts.map(p => ({
-          ...p,
-          isCheapest: p.price === minPrice && p.price > 0
+        const allProducts = ((platformResults || []).flat() as Product[]).map(product => ({
+          ...product,
+          platformId: product.platformId || PLATFORMS.find(platform => product.platform?.includes(platform.name))?.id
         }))
+        const processedResults = recomputeCheapest(allProducts)
 
         setSearchResults(processedResults)
+        setPlatformStatuses(prev => {
+          const next = { ...prev }
+          for (const platformId of selectedPlatforms) {
+            if (next[platformId]?.status === 'searching') {
+              const platformResults = processedResults.filter(product => product.platformId === platformId)
+              const summary = summarizePlatformResults(platformResults)
+              next[platformId] = { status: 'done', count: summary.count, minPrice: summary.minPrice }
+            }
+          }
+          return next
+        })
       }
     } catch (err) {
       console.error(err)
+      setPlatformStatuses(prev => {
+        const next = { ...prev }
+        for (const platformId of selectedPlatforms) {
+          if (next[platformId]?.status === 'searching') {
+            next[platformId] = { ...next[platformId], status: 'error', error: '搜尋中斷或失敗' }
+          }
+        }
+        return next
+      })
     } finally {
       setIsSearching(false)
       setIsStopping(false)
@@ -294,6 +422,13 @@ const Dashboard = () => {
     setIsStopping(true)
     try {
       await (window as any).electronAPI.invoke('interrupt-search')
+      setPlatformStatuses(prev => {
+        const next = { ...prev }
+        for (const [platformId, info] of Object.entries(next)) {
+          if (info.status === 'searching') next[platformId] = { ...info, status: 'done' }
+        }
+        return next
+      })
     } catch (err) {
       console.error('Failed to interrupt search:', err)
     }
@@ -446,9 +581,9 @@ const Dashboard = () => {
     : nhiResults
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-amber-500/30">
+    <div className="dashboard-shell min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-amber-500/30">
       {/* 🚀 頂部旗艦導航欄 - 深海黑 */}
-      <header className="sticky top-0 z-50 bg-slate-900/80 backdrop-blur-xl border-b border-white/5 px-6 py-4 flex items-center justify-between">
+      <header className="dashboard-header sticky top-0 z-50 bg-slate-900/80 backdrop-blur-xl border-b border-white/5 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center shadow-lg shadow-amber-900/20">
             <Zap className="text-slate-950 fill-current" size={24} />
@@ -465,7 +600,7 @@ const Dashboard = () => {
             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{isSearching ? 'Syncing...' : 'System Ready'}</span>
             
             {/* 橋接狀態燈 - 強制顯示以便診斷 */}
-            <div className="flex items-center gap-2 ml-2 px-2 py-0.5 bg-slate-800 rounded-md border border-white/5">
+            <div className="dashboard-status-pill flex items-center gap-2 ml-2 px-2 py-0.5 bg-slate-800 rounded-md border border-white/5">
               <div className={`w-1.5 h-1.5 rounded-full ${bridgeConnected ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-rose-500 animate-pulse'}`} />
               <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">Bridge: {bridgeConnected ? 'Live' : 'Offline'}</span>
             </div>
@@ -477,7 +612,7 @@ const Dashboard = () => {
         </div>
       </header>
 
-      <main className="max-w-[1600px] mx-auto p-8 space-y-12">
+      <main className="dashboard-main max-w-[1600px] mx-auto p-8 space-y-12">
         {/* 📊 建索引進度條 */}
         {indexingStatus && (
           <div className={`flex items-center gap-3 px-4 py-2 text-sm font-bold rounded-lg border-l-4 ${
@@ -495,9 +630,9 @@ const Dashboard = () => {
         )}
 
         <section className="space-y-8">
-          <div className="bg-slate-800/40 rounded-2xl border border-white/5 flex flex-col md:flex-row items-stretch overflow-hidden">
+          <div className="dashboard-hero-card bg-slate-800/40 rounded-2xl border border-white/5 flex flex-col md:flex-row items-stretch overflow-hidden">
             <div className="flex-1 px-12 py-12 border-b md:border-b-0 md:border-r border-white/5">
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 text-amber-500 rounded-lg text-[10px] font-black uppercase tracking-wider mb-4 border border-amber-500/20">
+              <div className="dashboard-section-kicker inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 text-amber-500 rounded-lg text-[10px] font-black uppercase tracking-wider mb-4 border border-amber-500/20">
                 <Pill size={12} />
                 Clinical Ocean Database
               </div>
@@ -543,7 +678,7 @@ const Dashboard = () => {
           </div>
         )}
 
-        <form onSubmit={handleNhiSearch} className="bg-slate-800 rounded-xl border border-white/10 overflow-hidden shadow-2xl">
+        <form onSubmit={handleNhiSearch} className="dashboard-search-form bg-slate-800 rounded-xl border border-white/10 overflow-hidden shadow-2xl">
           <div className="flex flex-col md:flex-row items-stretch">
             <div className="flex-1 relative bg-transparent border-b md:border-b-0 md:border-r border-white/5 flex items-center">
               <input
@@ -619,7 +754,7 @@ const Dashboard = () => {
         {!isNhiSearching && nhiResults.length > 0 && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
             {/* 🎯 劑量快篩標籤列 */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-4">
+            <div className="dashboard-chip-grid grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-4">
               <button
                 onClick={() => setSelectedDosage(null)}
                 className={`flex items-center justify-center px-4 py-4 text-xs font-black rounded-none transition-all border-2 ${
@@ -645,7 +780,7 @@ const Dashboard = () => {
               ))}
             </div>
 
-            <div className="clinical-table-container border-2 border-slate-300">
+            <div className="dashboard-panel dashboard-nhi-results clinical-table-container border-2 border-slate-300">
               <div 
                 className="overflow-x-auto" 
                 style={{ 
@@ -772,7 +907,7 @@ const Dashboard = () => {
         )}
 
         {!isNhiSearching && nhiSearchTerm.trim() !== '' && nhiResults.length === 0 && (
-          <div className="bg-white/50 border border-dashed border-slate-200 rounded-none p-10 text-center">
+          <div className="dashboard-empty-state bg-white/50 border border-dashed border-slate-200 rounded-none p-10 text-center">
             <p className="text-slate-400 font-bold mb-1">🔍 查無精確匹配資料</p>
             <p className="text-[10px] text-slate-300">請確認輸入的是 10 位健保碼，或標準的中英文品牌名</p>
           </div>
@@ -784,7 +919,7 @@ const Dashboard = () => {
       {/* --- Section 2: Market Price Comparison --- */}
       <section className="space-y-6">
         <div className="mb-6 mt-12">
-          <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-[10px] font-black uppercase tracking-wider mb-2 border border-indigo-100">
+          <div className="dashboard-section-kicker dashboard-section-kicker-blue inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-[10px] font-black uppercase tracking-wider mb-2 border border-indigo-100">
             <Globe size={12} />
             Market Liquidity Tracker
           </div>
@@ -795,7 +930,7 @@ const Dashboard = () => {
         </div>
 
         {/* 🚀 平台選擇控制區區塊 */}
-        <div className="clinical-table-container border-4 bg-white p-6 space-y-6">
+        <div className="dashboard-panel clinical-table-container border-4 bg-white p-6 space-y-6">
           <div className="flex flex-col md:flex-row items-stretch gap-10">
             <div className="flex-1">
               {/* 平台開關控制列 */}
@@ -816,7 +951,7 @@ const Dashboard = () => {
             </div>
           </div>
           
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+          <div className="dashboard-platform-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {PLATFORMS.map(platform => {
               const isSelected = selectedPlatforms.includes(platform.id)
               return (
@@ -841,7 +976,7 @@ const Dashboard = () => {
           </div>
         </div>
 
-        <form onSubmit={handleSearch} className="bg-slate-800 rounded-[2rem] shadow-2xl shadow-amber-900/20 border border-white/10 overflow-hidden group focus-within:ring-8 focus-within:ring-amber-500/10 transition-all duration-300">
+        <form onSubmit={handleSearch} className="dashboard-search-form dashboard-market-search bg-slate-800 rounded-[2rem] shadow-2xl shadow-amber-900/20 border border-white/10 overflow-hidden group focus-within:ring-8 focus-within:ring-amber-500/10 transition-all duration-300">
           <div className="flex flex-col md:flex-row items-stretch">
             <div className="flex-1 relative bg-transparent border-b md:border-b-0 md:border-r border-white/5 flex flex-col justify-center">
               <input
@@ -890,15 +1025,19 @@ const Dashboard = () => {
               <div className="flex items-stretch gap-4 w-full h-full">
                 <button
                   type="button"
-                  onClick={() => setIsStrictFilter(!isStrictFilter)}
+                  onClick={() => setIsStrictFilter(prev => !prev)}
+                  disabled={isSearching || searchResults.length === 0}
                   className={`flex-1 px-4 py-8 text-xl font-black flex items-center justify-center gap-3 transition-all active:scale-95 clinical-btn-tactile rounded-sm ${
                     isStrictFilter 
                       ? 'clinical-btn-tactile-blue' 
                       : 'clinical-btn-tactile-slate opacity-60'
+                  } ${
+                    isSearching || searchResults.length === 0 ? 'cursor-not-allowed opacity-40' : ''
                   }`}
+                  title={isSearching ? '請等全部平台搜尋完成後再套用精確過濾' : '搜尋完成後一鍵套用或取消精確過濾'}
                 >
                   <CheckCircle2 size={24} />
-                  <span>{isStrictFilter ? '已開啟過濾' : '精確過濾'}</span>
+                  <span>{isStrictFilter ? '取消精確過濾' : '一鍵精確過濾'}</span>
                 </button>
 
                 {isSearching && (
@@ -923,9 +1062,129 @@ const Dashboard = () => {
             </div>
           </div>
         </form>
+
+        {captchaQueue.length > 0 && (
+          <div className="dashboard-panel dashboard-captcha-panel clinical-table-container border-4 border-amber-500/40 bg-slate-900 p-4">
+            <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
+              {captchaQueue.map((req) => (
+                <div
+                  key={req.platformId}
+                  className="flex-shrink-0 w-80 bg-slate-900 border-2 border-amber-500/50 rounded-2xl shadow-2xl overflow-hidden"
+                >
+                  <div className="bg-amber-500 px-4 py-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <ShieldAlert size={16} className="text-slate-900" />
+                      <span className="font-black text-slate-900 text-xs uppercase tracking-tighter">
+                        {req.platformName} 驗證碼
+                      </span>
+                    </div>
+                    <div className="w-2 h-2 rounded-full bg-slate-900 animate-pulse" />
+                  </div>
+
+                  <div className="p-4 space-y-4">
+                    <div className="bg-white rounded-xl p-3 flex justify-center shadow-inner min-h-[60px]">
+                      {req.image ? (
+                        <img
+                          src={req.image}
+                          alt="captcha"
+                          className="h-12 object-contain"
+                        />
+                      ) : (
+                        <div className="flex items-center gap-2 text-slate-400">
+                          <Loader2 size={16} className="animate-spin" />
+                          <span className="text-[10px] font-bold">載入中...</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="relative group">
+                      <input
+                        type="text"
+                        value={captchaInputs[req.platformId] || ''}
+                        onChange={(e) => setCaptchaInputs(prev => ({
+                          ...prev,
+                          [req.platformId]: e.target.value
+                        }))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleCaptchaSubmit(req.platformId)
+                        }}
+                        placeholder="請輸入驗證碼"
+                        autoFocus
+                        className="w-full bg-slate-800 border-2 border-white/5 rounded-xl px-4 py-3 text-white font-black placeholder:text-slate-600 focus:border-amber-500/50 transition-all outline-none"
+                      />
+                      <button
+                        onClick={() => handleCaptchaSubmit(req.platformId)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-lg transition-colors shadow-lg"
+                      >
+                        <Send size={18} />
+                      </button>
+                    </div>
+
+                    <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest text-center">
+                      Remote Verification Center • Active
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {Object.keys(platformStatuses).length > 0 && (
+          <div className="dashboard-panel clinical-table-container">
+            <div className="overflow-x-auto">
+              <table className="clinical-table min-w-[760px]">
+                <thead>
+                  <tr className="text-slate-500 text-sm font-semibold uppercase tracking-wider">
+                    <th>平台</th>
+                    <th>狀態</th>
+                    <th>筆數</th>
+                    <th>最低價</th>
+                    <th>備註</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedPlatforms.map(platformId => {
+                    const info = platformStatuses[platformId] || { status: 'idle', count: 0 }
+                    const statusText =
+                      info.status === 'searching' ? '搜尋中...' :
+                      info.status === 'error' ? '錯誤' :
+                      info.count > 0 ? '完成' :
+                      info.status === 'done' ? '無資料' :
+                      '等待'
+                    const statusClass =
+                      info.status === 'searching' ? 'bg-amber-500 text-slate-950' :
+                      info.status === 'error' ? 'bg-rose-600 text-white' :
+                      info.count > 0 ? 'bg-emerald-600 text-white' :
+                      'bg-slate-700 text-slate-200'
+
+                    return (
+                      <tr key={platformId} className="border-b border-white/10">
+                        <td className="font-black text-slate-900">
+                          {platformNameMap[platformId] || platformId}
+                        </td>
+                        <td>
+                          <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-sm text-xs font-black ${statusClass}`}>
+                            {info.status === 'searching' && <Loader2 size={14} className="animate-spin" />}
+                            {statusText}
+                          </span>
+                        </td>
+                        <td className="font-mono font-black">{info.status === 'searching' ? '-' : info.count}</td>
+                        <td className="font-mono font-black">{info.minPrice ? `$${info.minPrice}` : '-'}</td>
+                        <td className="text-sm font-bold text-slate-500">
+                          {info.error || (info.status === 'searching' ? '正在查詢' : info.count > 0 ? '已更新' : '已完成')}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </section>
 
-      <div className="clinical-table-container">
+      <div className="dashboard-panel clinical-table-container">
         <div className="overflow-x-auto">
           <table className="clinical-table min-w-[1000px]">
           <thead>
@@ -957,7 +1216,7 @@ const Dashboard = () => {
               // 實施過濾邏輯
               // 1. 準備顯示資料 (不再物理刪除)
               let displayData = searchResults.map(p => {
-                const term = searchTerm.trim().toLowerCase();
+                const term = normalizeStrictText(searchTerm);
                 
                 // 基本匹配
                 const basicMatch = (
@@ -967,29 +1226,14 @@ const Dashboard = () => {
                   p.memo?.toLowerCase().includes(term)
                 );
 
-                // 複方過濾邏輯 (如果開啟精確過濾)
                 let isMatch = basicMatch;
-                if (isStrictFilter && term && basicMatch) {
-                  const isSearchCompound = term.includes('/') || term.includes('+');
-
-                  // 改良複方判定：排除劑型縮寫 (如 /PTP, /Tab, /CAP, /mL)
-                  // 只有當 "/" 後方包含中文字，或英文長度 > 5 時，才視為複方
-                  const isCompound = (str: string): boolean => {
-                    if (str.includes('+')) return true;
-                    if (!str.includes('/')) return false;
-                    return str.split('/').slice(1).some(part => {
-                      const clean = part.trim();
-                      if (/[一-龥]/.test(clean)) return true; // 有中文 = 藥名
-                      const alpha = clean.replace(/[^a-zA-Z]/g, '');
-                      return alpha.length > 5; // 英文長度 > 5 = 藥名而非縮寫
-                    });
-                  };
-
-                  const isProductCompound = isCompound((p.name || '') + (p.spec || ''));
-
-                  // 如果搜尋的是單方 (沒斜線)，但產品是複方 (有斜線)，則隱藏
-                  if (!isSearchCompound && isProductCompound) {
-                    isMatch = false;
+                if (isStrictFilter && term) {
+                  if (marketFilter === 'code') {
+                    isMatch = normalizeStrictText(p.nhiCode) === term
+                  } else if (marketFilter === 'component') {
+                    isMatch = [p.spec, p.memo].some(value => normalizeStrictText(value) === term)
+                  } else {
+                    isMatch = isStrictNameMatch(p.name, term)
                   }
                 }
 
@@ -1025,67 +1269,57 @@ const Dashboard = () => {
               }
 
               return displayData.map((product, idx) => {
-                // 根據平台定義「暴力高飽和」底色 (強制覆蓋版)
-                const p = product.platform.toLowerCase();
-                const bgColor = 
-                  p.includes('yeschain') ? '!bg-blue-600/60' :
-                  p.includes('裕利') ? '!bg-amber-600/60' :
-                  p.includes('耀聖') ? '!bg-emerald-600/60' :
-                  '!bg-purple-600/60';
-                
-                const borderColor = 
-                  p.includes('yeschain') ? '!border-blue-400' :
-                  p.includes('裕利') ? '!border-amber-400' :
-                  p.includes('耀聖') ? '!border-emerald-400' :
-                  '!border-purple-400';
+                const platformStyle = getPlatformRowStyle(product)
+                const rowBg = platformStyle.row
+                const borderColor = platformStyle.strip
 
                 return (
                   <tr key={idx} className="border-b border-white/10 group" style={{ display: product.isMatch ? 'table-row' : 'none' }}>
-                    <td className={`${bgColor} ${borderColor} !border-l-8 font-medium`}>
-                      <span className="px-2 py-1 rounded-full text-[10px] font-black bg-slate-950 text-white border border-white/20 uppercase">
+                    <td className={`${rowBg} ${borderColor} font-medium`}>
+                      <span className={platformStyle.badge}>
                         {product.platform}
                       </span>
                     </td>
-                    <td className={bgColor}>
-                      <div className="font-mono text-sm text-white font-bold">{product.nhiCode || '-'}</div>
+                    <td className={rowBg}>
+                      <div className="platform-code">{product.nhiCode || '-'}</div>
                     </td>
-                    <td className={bgColor}>
-                      <div className="font-black text-white">$ {product.nhiPrice ? product.nhiPrice : '-'}</div>
+                    <td className={rowBg}>
+                      <div className="platform-nhi-price">$ {product.nhiPrice ? product.nhiPrice : '-'}</div>
                     </td>
-                    <td className={bgColor}>
-                      <div className="font-black text-white text-xl tracking-tight drop-shadow-md">{product.name}</div>
-                      <div className="text-xs text-white/80 font-bold mt-1">{product.spec}</div>
+                    <td className={rowBg}>
+                      <div className={`platform-product-name ${platformStyle.accentText}`}>{product.name}</div>
+                      <div className="platform-muted">{product.spec}</div>
                     </td>
-                    <td className={bgColor}>
-                      <div className="text-xs font-black text-white bg-rose-600/80 px-1 inline-block">{product.expiry}</div>
-                      <div className="text-[10px] text-white/90 font-bold mt-0.5">{product.memo}</div>
+                    <td className={rowBg}>
+                      <div className="platform-expiry">{product.expiry}</div>
+                      <div className="platform-muted platform-memo">{product.memo}</div>
                     </td>
-                    <td className={bgColor}>
+                    <td className={rowBg}>
                       <div className="flex items-center gap-2">
-                        <span className="text-3xl font-black text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
+                        <span className="platform-price">
                           ${product.price}
                         </span>
-                        <span className="text-white/70 text-sm font-bold">/ {product.unit}</span>
+                        <span className="platform-unit">/ {product.unit}</span>
                       </div>
                     </td>
-                    <td className={bgColor}>
-                      <div className="font-black text-white text-lg drop-shadow-sm">{product.unitPrice ? `$${product.unitPrice}` : '-'}</div>
+                    <td className={rowBg}>
+                      <div className="platform-unit-price">{product.unitPrice ? `$${product.unitPrice}` : '-'}</div>
                     </td>
-                    <td className={bgColor}>
+                    <td className={rowBg}>
                       <div className="flex items-center gap-2">
                         {(() => {
                           const outOfStock = /無|缺|^0$|售完|補貨|暫停/i.test(product.stock);
                           return (
-                            <span className={`px-2 py-1 rounded text-sm font-black ${outOfStock ? 'bg-rose-600 text-white animate-pulse' : 'bg-emerald-600 text-white'}`}>
+                            <span className={`platform-stock ${outOfStock ? 'platform-stock-out' : 'platform-stock-in'}`}>
                               {product.stock}
                             </span>
                           );
                         })()}
                       </div>
                     </td>
-                    <td className={bgColor}>
+                    <td className={rowBg}>
                       {product.isCheapest && (
-                        <div className="bg-yellow-400 text-slate-950 px-3 py-1 rounded-none text-[10px] font-black flex items-center gap-1 uppercase">
+                        <div className="platform-top-price">
                           <TrendingDown size={12} /> TOP PRICE
                         </div>
                       )}
@@ -1115,72 +1349,6 @@ const Dashboard = () => {
       )}
       </main>
 
-      {/* 驗證碼交互中心 (並列磁貼式) */}
-      {captchaQueue.length > 0 && (
-        <div className="fixed bottom-6 left-6 right-6 z-[100] flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
-          {captchaQueue.map((req) => (
-            <div 
-              key={req.platformId}
-              className="flex-shrink-0 w-80 bg-slate-900 border-2 border-amber-500/50 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-xl animate-in slide-in-from-bottom-10"
-            >
-              <div className="bg-amber-500 px-4 py-2 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <ShieldAlert size={16} className="text-slate-900" />
-                  <span className="font-black text-slate-900 text-xs uppercase tracking-tighter">
-                    {req.platformName} 驗證碼
-                  </span>
-                </div>
-                <div className="w-2 h-2 rounded-full bg-slate-900 animate-pulse" />
-              </div>
-              
-              <div className="p-4 space-y-4">
-                <div className="bg-white rounded-xl p-3 flex justify-center shadow-inner min-h-[60px]">
-                  {req.image ? (
-                    <img 
-                      src={req.image} 
-                      alt="captcha" 
-                      className="h-12 object-contain"
-                    />
-                  ) : (
-                    <div className="flex items-center gap-2 text-slate-400">
-                      <Loader2 size={16} className="animate-spin" />
-                      <span className="text-[10px] font-bold">載入中...</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="relative group">
-                  <input
-                    type="text"
-                    value={captchaInputs[req.platformId] || ''}
-                    onChange={(e) => setCaptchaInputs(prev => ({
-                      ...prev,
-                      [req.platformId]: e.target.value
-                    }))}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleCaptchaSubmit(req.platformId)
-                    }}
-                    placeholder="請輸入驗證碼"
-                    autoFocus
-                    className="w-full bg-slate-800 border-2 border-white/5 rounded-xl px-4 py-3 text-white font-black placeholder:text-slate-600 focus:border-amber-500/50 transition-all outline-none"
-                  />
-                  <button 
-                    onClick={() => handleCaptchaSubmit(req.platformId)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-lg transition-colors shadow-lg"
-                  >
-                    <Send size={18} />
-                  </button>
-                </div>
-                
-                <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest text-center">
-                  Remote Verification Center • Active
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      
       {/* 🚀 頁腳 */}
       <footer className="mt-20 border-t border-white/5 p-10 text-center bg-transparent">
         <p className="text-slate-500 font-bold text-sm">Handcrafted by Lithium Lee</p>

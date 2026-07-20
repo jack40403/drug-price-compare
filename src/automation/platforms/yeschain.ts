@@ -205,38 +205,104 @@ export class YesChainConnector extends Connector {
       allResults.push(...pageResults)
       console.log(`[好鄰居] 第 ${pageCount} 頁抓取完成，目前共 ${allResults.length} 筆`)
 
-      // 檢查是否有下一頁
-      const hasNextPage = await page.evaluate(() => {
-        return Array.from(document.querySelectorAll('div.justify-end span, span')).some(
-          s => (s as HTMLElement).innerText?.trim() === '下一頁'
-        )
+      const pageBeforeNext = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('tr')).filter(tr => tr.innerText.includes('NT$'))
+        const paginationContainers = Array.from(document.querySelectorAll('div.justify-end, nav, [class*="pagination"], [class*="Pagination"]')) as HTMLElement[]
+        const pageNumbers = paginationContainers
+          .flatMap(container => Array.from(container.querySelectorAll('button, li, span, a')))
+          .map(el => Number((el as HTMLElement).innerText?.trim()))
+          .filter(n => Number.isInteger(n) && n > 0)
+        const activePage = paginationContainers
+          .flatMap(container => Array.from(container.querySelectorAll('[aria-current="page"], .active, .is-active, [class*="active"]')))
+          .map(el => Number((el as HTMLElement).innerText?.trim()))
+          .find(n => Number.isInteger(n) && n > 0)
+
+        return {
+          firstRowText: rows[0]?.innerText || '',
+          rowCount: rows.length,
+          currentPage: activePage || (pageNumbers.length ? Math.min(...pageNumbers) : 1),
+        }
       })
 
-      if (!hasNextPage) {
-        console.log('[好鄰居] 已達最後一頁，停止翻頁')
+      const nextPageReady = await page.evaluate(() => {
+        const isVisible = (el: HTMLElement) => {
+          const style = window.getComputedStyle(el)
+          const rect = el.getBoundingClientRect()
+          return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+        }
+        const isDisabled = (el: HTMLElement) => {
+          const disabledOwner = el.closest('button, a, li, span') as HTMLElement | null
+          const target = disabledOwner || el
+          const className = target.className?.toString() || ''
+          return (
+            target.hasAttribute('disabled') ||
+            target.getAttribute('aria-disabled') === 'true' ||
+            /disabled|disable|is-disabled|cursor-not-allowed|opacity-50/.test(className)
+          )
+        }
+
+        const rows = Array.from(document.querySelectorAll('tr')).filter(tr => tr.innerText.includes('NT$'))
+        const table = rows[0]?.closest('table')
+        const resultArea = table?.parentElement?.parentElement || table?.parentElement || document.body
+        const containers = Array.from(resultArea.querySelectorAll('div.justify-end, nav, [class*="pagination"], [class*="Pagination"]')) as HTMLElement[]
+
+        for (const container of containers) {
+          if (!isVisible(container)) continue
+
+          const numericPages = Array.from(container.querySelectorAll('button, li, span, a'))
+            .map(el => Number((el as HTMLElement).innerText?.trim()))
+            .filter(n => Number.isInteger(n) && n > 0)
+          const activePage = Array.from(container.querySelectorAll('[aria-current="page"], .active, .is-active, [class*="active"]'))
+            .map(el => Number((el as HTMLElement).innerText?.trim()))
+            .find(n => Number.isInteger(n) && n > 0)
+          const currentPage = activePage || (numericPages.length ? Math.min(...numericPages) : 1)
+          const hasRealNextPage = numericPages.some(n => n > currentPage)
+          if (!hasRealNextPage) continue
+
+          const nextBtn = Array.from(container.querySelectorAll('button, a, span[role="button"], li, span')).find(el => {
+            const element = el as HTMLElement
+            const text = element.innerText?.trim() || ''
+            const aria = element.getAttribute('aria-label') || element.getAttribute('title') || ''
+            return (
+              (text === '下一頁' || aria.includes('下一頁') || aria.toLowerCase().includes('next')) &&
+              isVisible(element) &&
+              !isDisabled(element)
+            )
+          }) as HTMLElement | undefined
+
+          if (nextBtn) {
+            nextBtn.click()
+            return { clicked: true, nextPage: currentPage + 1 }
+          }
+        }
+
+        return { clicked: false, nextPage: null }
+      })
+
+      if (!nextPageReady.clicked) {
+        console.log('[好鄰居] 下一頁按鈕不存在或已停用，停止翻頁')
         break
       }
 
-      // 點擊下一頁並等待內容更新
-      const firstRowText = await page.evaluate(() => {
-        const rows = Array.from(document.querySelectorAll('tr')).filter(tr => tr.innerText.includes('NT$'))
-        return rows[0]?.innerText || ''
-      })
-
-      await page.evaluate(() => {
-        const nextBtn = Array.from(document.querySelectorAll('span')).find(
-          s => (s as HTMLElement).innerText?.trim() === '下一頁'
-        )
-        if (nextBtn) (nextBtn as HTMLElement).click()
-      })
-
       try {
-        await page.waitForFunction((oldText) => {
+        await page.waitForFunction((oldState) => {
           const rows = Array.from(document.querySelectorAll('tr')).filter((tr: any) => tr.innerText.includes('NT$'))
-          return rows.length > 0 && rows[0].innerText !== oldText
-        }, firstRowText, { timeout: 8000 })
+          const paginationContainers = Array.from(document.querySelectorAll('div.justify-end, nav, [class*="pagination"], [class*="Pagination"]')) as HTMLElement[]
+          const activePage = paginationContainers
+            .flatMap(container => Array.from(container.querySelectorAll('[aria-current="page"], .active, .is-active, [class*="active"]')))
+            .map(el => Number((el as HTMLElement).innerText?.trim()))
+            .find(n => Number.isInteger(n) && n > 0)
+
+          return (
+            rows.length > 0 &&
+            (rows[0].innerText !== oldState.firstRowText ||
+              rows.length !== oldState.rowCount ||
+              (activePage && activePage !== oldState.currentPage))
+          )
+        }, pageBeforeNext, { timeout: 8000 })
+        console.log(`[好鄰居] 下一頁載入成功，目前第 ${nextPageReady.nextPage || pageCount + 1} 頁`)
       } catch (e) {
-        console.log('[好鄰居] 翻頁等待超時，停止')
+        console.log('[好鄰居] 翻頁後頁面未變化，停止')
         break
       }
 
