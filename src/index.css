@@ -13,6 +13,12 @@ body {
   color: #0f172a;
 }
 
+#root,
+.app-root {
+  height: 100vh;
+  overflow: hidden;
+}
+
 h1, h2, h3 {
   font-weight: 900;
   color: #0f172a;
@@ -32,6 +38,9 @@ input {
 }
 
 .app-floating-header {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
   flex: 0 0 auto;
   background: rgba(248, 250, 252, 0.96) !important;
   border-bottom: 1px solid #cbd5e1 !important;
@@ -45,8 +54,12 @@ input {
 }
 
 .app-primary-nav {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px !important;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .app-primary-nav button {
@@ -89,6 +102,11 @@ input {
   background: #0f766e !important;
   color: #ffffff !important;
   box-shadow: 0 6px 14px rgba(15, 118, 110, 0.2);
+}
+
+.app-main-scroll {
+  min-height: 0;
+  overscroll-behavior: contain;
 }
 
 .dashboard-header {

@@ -58,7 +58,7 @@ function App() {
   const isElectron = window.navigator.userAgent.includes('Electron');
 
   return (
-    <div className={`flex flex-col ${isElectron ? 'h-screen overflow-hidden' : 'min-h-screen'} bg-slate-50`}>
+    <div className={`app-root flex flex-col ${isElectron ? 'h-screen overflow-hidden' : 'min-h-screen'} bg-slate-50`}>
       {/* 🔝 Top Header Navigation */}
       <header className="app-floating-header bg-white border-b border-slate-200 shadow-sm z-50">
         <div className="app-header-inner max-w-[1600px] mx-auto px-6 flex items-center justify-between">
@@ -160,7 +160,7 @@ function App() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
+      <main className="app-main-scroll flex-1 overflow-auto">
         <div className="h-full">
           {activeTab === 'dashboard' ? <Dashboard dashboardTab={dashboardTab} setDashboardTab={setDashboardTab} /> : <Settings />}
         </div>
