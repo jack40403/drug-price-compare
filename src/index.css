@@ -31,6 +31,66 @@ input {
   color: #0f172a !important;
 }
 
+.app-floating-header {
+  flex: 0 0 auto;
+  background: rgba(248, 250, 252, 0.96) !important;
+  border-bottom: 1px solid #cbd5e1 !important;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(16px);
+}
+
+.app-header-inner {
+  min-height: 76px;
+  gap: 16px;
+}
+
+.app-primary-nav {
+  flex-wrap: wrap;
+  gap: 8px !important;
+}
+
+.app-primary-nav button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 900;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dashboard-header-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #f1f5f9;
+}
+
+.dashboard-header-tab {
+  min-height: 32px !important;
+  padding: 6px 14px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  color: #475569 !important;
+  font-size: 13px !important;
+  font-weight: 900 !important;
+}
+
+.dashboard-header-tab-active {
+  background: #0f766e !important;
+  color: #ffffff !important;
+  box-shadow: 0 6px 14px rgba(15, 118, 110, 0.2);
+}
+
 .dashboard-header {
   position: sticky;
   top: 0;

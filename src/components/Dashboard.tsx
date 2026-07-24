@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Search, Loader2, ArrowUpDown, CheckCircle2, TrendingDown, Pill, RefreshCcw, Copy, Check, Zap, Banknote, Globe, Activity, Settings, Image as ImageIcon, Send, ShieldAlert } from 'lucide-react'
+import { Loader2, ArrowUpDown, CheckCircle2, TrendingDown, Pill, RefreshCcw, Copy, Check, Zap, Banknote, Globe, Activity, Image as ImageIcon, Send, ShieldAlert } from 'lucide-react'
 import DrugAppearanceModal from './DrugAppearanceModal'
 
 interface Product {
@@ -22,8 +22,12 @@ interface PlatformStatusInfo {
   error?: string;
 }
 
-const Dashboard = () => {
-  const [dashboardTab, setDashboardTab] = useState<'nhi' | 'market'>('nhi')
+interface DashboardProps {
+  dashboardTab: 'nhi' | 'market';
+  setDashboardTab: (tab: 'nhi' | 'market') => void;
+}
+
+const Dashboard = ({ dashboardTab, setDashboardTab }: DashboardProps) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [nhiSearchTerm, setNhiSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState<any[]>([])
@@ -601,36 +605,6 @@ const Dashboard = () => {
 
   return (
     <div className="dashboard-shell min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-amber-500/30">
-      {/* 🚀 頂部旗艦導航欄 - 深海黑 */}
-      <header className="dashboard-header sticky top-0 z-50 bg-slate-900/80 backdrop-blur-xl border-b border-white/5 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center shadow-lg shadow-amber-900/20">
-            <Zap className="text-slate-950 fill-current" size={24} />
-          </div>
-          <div>
-            <h1 className="text-xl font-black tracking-tight text-white uppercase">Pharmacy <span className="text-amber-500">Price Terminal</span></h1>
-            <p className="text-[10px] font-black text-slate-500 tracking-widest uppercase">Clinical Data Management System</p>
-          </div>
-        </div>
-        
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isSearching ? 'bg-amber-400 animate-pulse' : 'bg-slate-700'}`} />
-            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{isSearching ? 'Syncing...' : 'System Ready'}</span>
-            
-            {/* 橋接狀態燈 - 強制顯示以便診斷 */}
-            <div className="dashboard-status-pill flex items-center gap-2 ml-2 px-2 py-0.5 bg-slate-800 rounded-md border border-white/5">
-              <div className={`w-1.5 h-1.5 rounded-full ${bridgeConnected ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-rose-500 animate-pulse'}`} />
-              <span className="text-[8px] font-black text-slate-400 uppercase tracking-tighter">Bridge: {bridgeConnected ? 'Live' : 'Offline'}</span>
-            </div>
-          </div>
-          <div className="h-4 w-px bg-white/10 mx-2" />
-          <button className="text-slate-500 hover:text-amber-400 transition-colors">
-            <Settings size={20} />
-          </button>
-        </div>
-      </header>
-
       <main className="dashboard-main max-w-[1600px] mx-auto p-8 space-y-12">
         {/* 📊 建索引進度條 */}
         {indexingStatus && (
@@ -647,27 +621,6 @@ const Dashboard = () => {
             </span>
           </div>
         )}
-
-        <div className="dashboard-tabbar" role="tablist" aria-label="儀表板功能分頁">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={dashboardTab === 'nhi'}
-            className={`dashboard-tab-button ${dashboardTab === 'nhi' ? 'dashboard-tab-active' : ''}`}
-            onClick={() => setDashboardTab('nhi')}
-          >
-            健保查詢
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={dashboardTab === 'market'}
-            className={`dashboard-tab-button ${dashboardTab === 'market' ? 'dashboard-tab-active' : ''}`}
-            onClick={() => setDashboardTab('market')}
-          >
-            中盤比價
-          </button>
-        </div>
 
         <section className="space-y-8" style={{ display: dashboardTab === 'nhi' ? 'block' : 'none' }}>
           <div className="dashboard-hero-card bg-slate-800/40 rounded-2xl border border-white/5 flex flex-col md:flex-row items-stretch overflow-hidden">

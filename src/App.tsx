@@ -8,6 +8,7 @@ import { LayoutDashboard, Settings as SettingsIcon, Pill, Globe, Search, Refresh
 
 function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'settings'>('dashboard')
+  const [dashboardTab, setDashboardTab] = useState<'nhi' | 'market'>('nhi')
   const [mode, setMode] = useState<'chrome' | 'python' | null>(null)
 
   useEffect(() => {
@@ -59,17 +60,22 @@ function App() {
   return (
     <div className={`flex flex-col ${isElectron ? 'h-screen overflow-hidden' : 'min-h-screen'} bg-slate-50`}>
       {/* 🔝 Top Header Navigation */}
-      <header className="bg-white border-b border-slate-200 shadow-sm z-50">
-        <div className="max-w-[1400px] mx-auto px-6 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-8">
+      <header className="app-floating-header bg-white border-b border-slate-200 shadow-sm z-50">
+        <div className="app-header-inner max-w-[1600px] mx-auto px-6 flex items-center justify-between">
+          <div className="flex items-center gap-5">
             <div className="flex items-center gap-3">
-              <div className="bg-blue-600 p-2 rounded-lg text-white">
+              <div className="bg-teal-600 p-2 rounded-lg text-white">
                 <Pill size={24} />
               </div>
-              <h1 className="font-black text-2xl tracking-tighter text-slate-900">藥品比價小精靈</h1>
+              <div>
+                <h1 className="font-black text-xl tracking-tighter text-slate-900 uppercase">
+                  Pharmacy <span className="text-teal-700">Price Terminal</span>
+                </h1>
+                <p className="text-[10px] font-black text-slate-400 tracking-widest uppercase">藥品比價小精靈</p>
+              </div>
             </div>
 
-            <nav className="flex items-center gap-2">
+            <nav className="app-primary-nav flex items-center gap-2">
               <button
                 onClick={() => setActiveTab('dashboard')}
                 className={`flex items-center gap-2 px-6 py-2 rounded-full text-sm font-black transition-all ${
@@ -81,6 +87,28 @@ function App() {
                 <LayoutDashboard size={18} />
                 比價儀表板
               </button>
+              {activeTab === 'dashboard' && (
+                <div className="dashboard-header-tabs" role="tablist" aria-label="儀表板功能分頁">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={dashboardTab === 'nhi'}
+                    className={`dashboard-header-tab ${dashboardTab === 'nhi' ? 'dashboard-header-tab-active' : ''}`}
+                    onClick={() => setDashboardTab('nhi')}
+                  >
+                    健保查詢
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={dashboardTab === 'market'}
+                    className={`dashboard-header-tab ${dashboardTab === 'market' ? 'dashboard-header-tab-active' : ''}`}
+                    onClick={() => setDashboardTab('market')}
+                  >
+                    中盤比價
+                  </button>
+                </div>
+              )}
               <button
                 onClick={() => setActiveTab('settings')}
                 className={`flex items-center gap-2 px-6 py-2 rounded-full text-sm font-black transition-all ${
@@ -95,7 +123,7 @@ function App() {
               
               <button 
                 onClick={() => window.open('https://drugtw.com/figure', '_blank')}
-                className="ml-4 flex items-center gap-2 px-6 py-2 bg-rose-50 text-rose-600 border-2 border-rose-100 rounded-full text-sm font-black hover:bg-rose-100 transition-all active:scale-95"
+                className="flex items-center gap-2 px-6 py-2 bg-rose-50 text-rose-600 border-2 border-rose-100 rounded-full text-sm font-black hover:bg-rose-100 transition-all active:scale-95"
               >
                 <Globe size={18} />
                 藥台灣-藥品辨識
@@ -103,7 +131,7 @@ function App() {
 
               <button 
                 onClick={() => window.open('https://info.nhi.gov.tw/INAE3000/INAE3000S01', '_blank')}
-                className="ml-2 flex items-center gap-2 px-6 py-2 bg-blue-50 text-blue-600 border-2 border-blue-100 rounded-full text-sm font-black hover:bg-blue-100 transition-all active:scale-95"
+                className="flex items-center gap-2 px-6 py-2 bg-blue-50 text-blue-600 border-2 border-blue-100 rounded-full text-sm font-black hover:bg-blue-100 transition-all active:scale-95"
               >
                 <Search size={18} />
                 健保用藥品項網路查詢
@@ -134,7 +162,7 @@ function App() {
       {/* Main Content */}
       <main className="flex-1 overflow-auto">
         <div className="h-full">
-          {activeTab === 'dashboard' ? <Dashboard /> : <Settings />}
+          {activeTab === 'dashboard' ? <Dashboard dashboardTab={dashboardTab} setDashboardTab={setDashboardTab} /> : <Settings />}
         </div>
       </main>
     </div>
