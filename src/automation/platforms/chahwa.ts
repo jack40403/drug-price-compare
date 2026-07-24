@@ -138,7 +138,11 @@ export class ChahwaConnector extends Connector {
             const priceMatch = priceLine.match(/([\d,.]+)\s*\/\s*([^\n\s]+)/);
             const price = priceMatch ? parseFloat(priceMatch[1].replace(/,/g, '')) : 0;
             const unit = priceMatch ? priceMatch[2].trim() : (priceLine.includes('/') ? priceLine.split('/')[1].trim() : '單位');
-            const stockStatus = stockIndex >= 0 ? specLines[stockIndex].replace('庫存:', '').trim() : '未知';
+            const rawStockStatus = stockIndex >= 0 ? specLines[stockIndex].replace('庫存:', '').trim() : '未知';
+            const stockNumber = parseFloat(rawStockStatus.replace(/[^\d.]/g, ''));
+            const stockStatus = rawStockStatus !== '未知' && !isNaN(stockNumber) && stockNumber <= 0
+              ? '無庫存'
+              : rawStockStatus;
 
             const itemText = (item as HTMLElement).innerText || '';
             const expiryMatch = itemText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);

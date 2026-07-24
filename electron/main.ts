@@ -244,6 +244,16 @@ class AutomationManager {
     return newPage
   }
 
+  async focusExistingPage(platformId: string) {
+    const page = this.pages.get(platformId)
+    if (!page || page.isClosed()) {
+      return { success: false, error: '平台頁面不存在或已關閉' }
+    }
+
+    await page.bringToFront()
+    return { success: true, url: page.url() }
+  }
+
   async interruptPages() {
     console.log('[Manager] Interrupting all active pages...')
     for (const page of this.pages.values()) {
@@ -338,6 +348,13 @@ ipcMain.handle('save-credentials', (_event, { platformId, username, password }) 
 ipcMain.handle('perform-search', async (_event, { searchTerm, platforms, filters }) => {
   return await performSearch(searchTerm, platforms, filters);
 });
+
+ipcMain.handle('focus-platform-page', async (_event, { platformId }) => {
+  if (!platformId || typeof platformId !== 'string') {
+    return { success: false, error: '缺少平台代碼' }
+  }
+  return automationManager.focusExistingPage(platformId)
+})
 
 // 定義統一的驗證碼處理函式
 const handleRequestCaptcha = async (platformId: string, platformName: string, image: string): Promise<string> => {

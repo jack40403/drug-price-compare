@@ -23,6 +23,7 @@ interface PlatformStatusInfo {
 }
 
 const Dashboard = () => {
+  const [dashboardTab, setDashboardTab] = useState<'nhi' | 'market'>('nhi')
   const [searchTerm, setSearchTerm] = useState('')
   const [nhiSearchTerm, setNhiSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState<any[]>([])
@@ -434,6 +435,24 @@ const Dashboard = () => {
     }
   }
 
+  const handleFocusPlatformPage = async (product: Product) => {
+    const platformId = getProductPlatformId(product)
+    if (!platformId || platformId === 'default') {
+      alert('無法判斷這筆資料所屬平台。')
+      return
+    }
+
+    try {
+      const result = await (window as any).electronAPI.invoke('focus-platform-page', { platformId })
+      if (!result?.success) {
+        alert(result?.error || '平台頁面不存在或已關閉。請重新搜尋後再切換。')
+      }
+    } catch (err) {
+      console.error('Failed to focus platform page:', err)
+      alert('切換平台頁面失敗。')
+    }
+  }
+
   const handleNhiSearch = async (e: React.FormEvent, customTerm?: string) => {
     e.preventDefault()
     const finalTerm = customTerm || nhiSearchTerm
@@ -629,7 +648,28 @@ const Dashboard = () => {
           </div>
         )}
 
-        <section className="space-y-8">
+        <div className="dashboard-tabbar" role="tablist" aria-label="儀表板功能分頁">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={dashboardTab === 'nhi'}
+            className={`dashboard-tab-button ${dashboardTab === 'nhi' ? 'dashboard-tab-active' : ''}`}
+            onClick={() => setDashboardTab('nhi')}
+          >
+            健保查詢
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={dashboardTab === 'market'}
+            className={`dashboard-tab-button ${dashboardTab === 'market' ? 'dashboard-tab-active' : ''}`}
+            onClick={() => setDashboardTab('market')}
+          >
+            中盤比價
+          </button>
+        </div>
+
+        <section className="space-y-8" style={{ display: dashboardTab === 'nhi' ? 'block' : 'none' }}>
           <div className="dashboard-hero-card bg-slate-800/40 rounded-2xl border border-white/5 flex flex-col md:flex-row items-stretch overflow-hidden">
             <div className="flex-1 px-12 py-12 border-b md:border-b-0 md:border-r border-white/5">
               <div className="dashboard-section-kicker inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 text-amber-500 rounded-lg text-[10px] font-black uppercase tracking-wider mb-4 border border-amber-500/20">
@@ -890,7 +930,7 @@ const Dashboard = () => {
                           <button
                             onClick={() => {
                               setSearchTerm(item.br || item.n_cn.split(' ')[0]);
-                              document.getElementById('market-search-input')?.scrollIntoView({ behavior: 'smooth' });
+                              setDashboardTab('market');
                             }}
                             className="px-2 py-1 bg-slate-800 text-white text-[10px] font-black rounded hover:bg-black"
                           >
@@ -914,10 +954,10 @@ const Dashboard = () => {
         )}
       </section>
 
-      <div className="h-px bg-slate-100 w-full" />
+      {dashboardTab === 'market' && <div className="h-px bg-slate-100 w-full" />}
 
       {/* --- Section 2: Market Price Comparison --- */}
-      <section className="space-y-6">
+      <section className="space-y-6" style={{ display: dashboardTab === 'market' ? 'block' : 'none' }}>
         <div className="mb-6 mt-12">
           <div className="dashboard-section-kicker dashboard-section-kicker-blue inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-[10px] font-black uppercase tracking-wider mb-2 border border-indigo-100">
             <Globe size={12} />
@@ -1184,7 +1224,7 @@ const Dashboard = () => {
         )}
       </section>
 
-      <div className="dashboard-panel clinical-table-container">
+      <div className="dashboard-panel clinical-table-container" style={{ display: dashboardTab === 'market' ? 'block' : 'none' }}>
         <div className="overflow-x-auto">
           <table className="clinical-table min-w-[1000px]">
           <thead>
@@ -1276,9 +1316,14 @@ const Dashboard = () => {
                 return (
                   <tr key={idx} className="border-b border-white/10 group" style={{ display: product.isMatch ? 'table-row' : 'none' }}>
                     <td className={`${rowBg} ${borderColor} font-medium`}>
-                      <span className={platformStyle.badge}>
+                      <button
+                        type="button"
+                        className={`${platformStyle.badge} platform-page-link`}
+                        title="切回剛剛查詢用的平台網頁"
+                        onClick={() => handleFocusPlatformPage(product)}
+                      >
                         {product.platform}
-                      </span>
+                      </button>
                     </td>
                     <td className={rowBg}>
                       <div className="platform-code">{product.nhiCode || '-'}</div>
