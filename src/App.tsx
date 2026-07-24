@@ -58,20 +58,19 @@ function App() {
   const isElectron = window.navigator.userAgent.includes('Electron');
 
   return (
-    <div className={`app-root flex flex-col ${isElectron ? 'h-screen overflow-hidden' : 'min-h-screen'} bg-slate-50`}>
+    <div className="app-root flex flex-col h-screen overflow-hidden bg-slate-50">
       {/* 🔝 Top Header Navigation */}
       <header className="app-floating-header bg-white border-b border-slate-200 shadow-sm z-50">
-        <div className="app-header-inner max-w-[1600px] mx-auto px-6 flex items-center justify-between">
+        <div className="app-header-inner max-w-[1600px] mx-auto px-4 flex items-center justify-between">
           <div className="flex items-center gap-5">
             <div className="flex items-center gap-3">
-              <div className="bg-teal-600 p-2 rounded-lg text-white">
-                <Pill size={24} />
+              <div className="bg-teal-600 p-1.5 rounded-lg text-white">
+                <Pill size={18} />
               </div>
               <div>
-                <h1 className="font-black text-xl tracking-tighter text-slate-900 uppercase">
-                  Pharmacy <span className="text-teal-700">Price Terminal</span>
+                <h1 className="font-black text-2xl tracking-tighter text-slate-900">
+                  藥品比價小精靈
                 </h1>
-                <p className="text-[10px] font-black text-slate-400 tracking-widest uppercase">藥品比價小精靈</p>
               </div>
             </div>
 
@@ -160,7 +159,7 @@ function App() {
       </header>
 
       {/* Main Content */}
-      <main className="app-main-scroll flex-1 overflow-auto">
+      <main className="flex-1 min-h-0 overflow-auto">
         <div className="h-full">
           {activeTab === 'dashboard' ? <Dashboard dashboardTab={dashboardTab} setDashboardTab={setDashboardTab} /> : <Settings />}
         </div>

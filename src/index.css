@@ -15,8 +15,7 @@ body {
 
 #root,
 .app-root {
-  height: 100vh;
-  overflow: hidden;
+  min-height: 100vh;
 }
 
 h1, h2, h3 {
@@ -49,13 +48,13 @@ input {
 }
 
 .app-header-inner {
-  min-height: 76px;
-  gap: 16px;
+  min-height: 44px;
+  gap: 8px;
 }
 
 .app-primary-nav {
   flex-wrap: nowrap;
-  gap: 8px !important;
+  gap: 6px !important;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
@@ -67,11 +66,11 @@ input {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 38px;
-  padding: 8px 16px;
+  min-height: 28px;
+  padding: 5px 9px;
   border-radius: 999px;
   border: 1px solid transparent;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 900;
   white-space: nowrap;
   cursor: pointer;
@@ -80,21 +79,21 @@ input {
 .dashboard-header-tabs {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px;
+  gap: 3px;
+  padding: 3px;
   border: 1px solid #cbd5e1;
   border-radius: 999px;
   background: #f1f5f9;
 }
 
 .dashboard-header-tab {
-  min-height: 32px !important;
-  padding: 6px 14px !important;
+  min-height: 26px !important;
+  padding: 4px 9px !important;
   border: 0 !important;
   border-radius: 999px !important;
   background: transparent !important;
   color: #475569 !important;
-  font-size: 13px !important;
+  font-size: 11px !important;
   font-weight: 900 !important;
 }
 
@@ -102,11 +101,6 @@ input {
   background: #0f766e !important;
   color: #ffffff !important;
   box-shadow: 0 6px 14px rgba(15, 118, 110, 0.2);
-}
-
-.app-main-scroll {
-  min-height: 0;
-  overscroll-behavior: contain;
 }
 
 .dashboard-header {
@@ -150,15 +144,15 @@ input {
 .dashboard-main {
   max-width: 1600px;
   margin: 0 auto;
-  padding: 32px;
+  padding: 16px 20px 20px;
 }
 
 .dashboard-main > * + * {
-  margin-top: 36px;
+  margin-top: 20px;
 }
 
 .dashboard-main section > * + * {
-  margin-top: 24px;
+  margin-top: 16px;
 }
 
 .dashboard-tabbar {
@@ -244,8 +238,8 @@ input {
 .dashboard-hero-card h3,
 .dashboard-main h3 {
   color: #0f172a !important;
-  font-size: clamp(32px, 4vw, 56px);
-  line-height: 0.98;
+  font-size: clamp(22px, 2.6vw, 38px);
+  line-height: 1.05;
   letter-spacing: -0.05em;
 }
 
@@ -316,7 +310,7 @@ input {
 }
 
 .dashboard-panel {
-  padding: 24px;
+  padding: 16px;
 }
 
 .dashboard-platform-grid,
